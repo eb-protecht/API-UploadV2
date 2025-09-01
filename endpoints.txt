@@ -1,0 +1,90 @@
+Upload Micro Service
+
+End Points
+	POST Methods
+		1- http://syn.coincraftco.com:30970/uploadmikro/v1/postprof/{UserID}/{IsCurrent}/{IsDeleted}
+			Parameters: 
+				UserId:    string - unique user ID from the database
+				IsCurrent: bool (T or F) - to mark as current profile pic
+				IsDeleted: bool (T or F) - to mark the profile pic as deleted
+			Body:
+				Form Data:
+					key: file
+					value: profile photo file (png, jpeg, or webp)
+			Return:
+				{"status":201,"message":"success","data":{"data":{"InsertedID":profile_pic_ID}}}
+
+
+		2- http://syn.coincraftco.com:30970/uploadmikro/v1/postpic/{UserID}/{Title}/{Description}/{Show}/{IsPayPerView/{IsDeleted}/{Tags}
+			Parameters: 
+				UserId:       string - unique user ID from the database
+				Title:        string - Title string
+				Show:         bool (T or F) - Hide or Show
+				IsPayPerView: bool (T or F) - Mark as pay per view
+				IsDeleted:    bool (T or F) - to mark photo as deleted
+				Tags:         array of strings - tags for this pic
+			Body:
+				Form Data:
+					key: file
+					value: profile photo file (png, jpeg, or webp)
+			Return:
+				{"status":201,"message":"success","data":{"data":{"InsertedID":pic_ID}}}
+
+
+		3- http://syn.coincraftco.com:30970/uploadmikro/v1/postvid/{UserID}/{Title}/{Description}/{Show}/{IsPayPerView/{IsDeleted}/{Tags}
+			Parameters: 
+				UserId:       string - unique user ID from the database
+				Title:        string - Title string
+				Show:         bool (T or F) - Hide or Show
+				IsPayPerView: bool (T or F) - Mark as pay per view
+				IsDeleted:    bool (T or F) - to mark photo as deleted
+				Tags:         array of strings - tags for this pic
+			Body:
+				Form Data:
+					key:   video
+					value: video file (mp4, avi, mkv, 3gp, or mov)
+					key:   thumb
+					value: thumb file (png, jpeg, or webp)
+			Return:
+				{"status":201,"message":"success","data":{"data":{"InsertedID":video_ID}}}
+		4- http://syn.coincraftco.com:30970/uploadmikro/v1/startstream/{UserID}/{Long}/{Lat}/{Tags}
+			Parameters:
+				UserID:       string - unique user ID from the database
+				Long:   			float  - the value of longitude
+				Lat:    			float  - the value of latitude
+				Tags:         array of strings - tags for this pic
+	PUT Methods
+		5- http://syn.coincraftco.com:30970/uploadmikro/v1/makeCurrentPostProf/{UserID}/{Filename}/{ToBeChanged}
+			Parameters:
+				UserId:       string - unique user ID from the database
+				Filename:     string - the name of the file which will be updated
+				ToBeChanged:  string - it can either be "delete" or "current" - 
+					when ToBeChanged is set to "delete": the file with the specified name will have the "isdeleted" flag set to true
+						in case that file had the "iscurrent" flag set to true, the function will automatically set it to false and find 
+						the latest profile pic uploaded and make it current.
+					when ToBeChanged is set to "current": the file with the specified name will have the "iscurrent" flag set to true
+						in case another file had "iscurrent" flag set to true, it will set it to false.
+			Return:			
+				{"status":201,"message":"success","data":{"data":"OK"}}
+		6- http://syn.coincraftco.com:30970/uploadmikro/v1/editcontent/{Type}/{UserID}/{Filename}/{Title}/{Description}/{Show}/{IsPayPerView}/{IsDeleted}/{Tags}
+			Parameters: 
+				Type:					string - it can either be "pic" or "video"
+					if {Type} value is "pic" the function will try to update a post pic
+					if {Type} value is "video" the function will try to update a post video 
+				UserId:       string - unique user ID from the database
+				Filename:     string - the name of the file which will be updated
+				Title:        string - Title string
+				Description   string - Description string
+				Show:         bool (T or F) - Hide or Show
+				IsPayPerView: bool (T or F) - Mark as pay per view
+				IsDeleted:    bool (T or F) - to mark photo as deleted
+				Tags:         array of strings - tags for this pic
+			Return:			
+				{"status":201,"message":"success","data":{"data":"OK"}}
+			NOTE: Title,Description, Show, IsPayPerView, IsDeleted, Tags are the fields that can change
+
+General Info:
+	Files are saved in file system with GUID namning and paths are stored in database i.e.:
+		profile: {"_id":{"$oid":"638ca0fc2cdbc92d6bab3c57"},"location":"/mnt/storage/eBcd34334/pics/profile/725ca9348266469a84c27fb00101fa0a.png","datecreated":{"$date":"2022-12-04T13:30:36.589Z"},"iscurrent":true,"isdeleted":false}
+		pics:    {"_id":{"$oid":"638cd0613330ce15f3878181"},"title":"Test","description":"this is just a test","location":"/mnt/storage/eBcd34334/pics/40a49ffc6d724444b63b616ab0301f75.jpeg","datecreated":{"$date":"2022-12-04T16:52:48.095Z"},"show":true,"ispayperview":false,"isdeleted":false,"tags":["[politics","music","films]"]}
+		video:   {"_id":{"$oid":"638ccf6e3330ce15f387817f"},"title":"Test","description":"this is just a test","location":"/mnt/storage/eBcd34334/videos/8ed815dd22f142f6b1f7c107ccdc8427.mp4","datecreated":{"$date":"2022-12-04T16:48:45.583Z"},"show":true,"ispayperview":false,"isdeleted":false,"tags":["[politics","music","films]"]}

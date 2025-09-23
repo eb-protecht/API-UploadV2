@@ -1762,3 +1762,35 @@ func SetTranscodingStatus() http.HandlerFunc {
 		successResponse(w, res)
 	}
 }
+
+func DeleteContent() http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		vars := mux.Vars(r)
+		contentID := vars["ContentID"]
+
+		oID, err := primitive.ObjectIDFromHex(contentID)
+		if err != nil {
+			errorResponse(rw, fmt.Errorf("invalid content ID"), 400)
+			return
+		}
+
+		// Soft delete by setting isdeleted to true
+		filter := bson.M{"_id": oID}
+		update := bson.M{"$set": bson.M{"isdeleted": true}}
+
+		result, err := contentCollection.UpdateOne(ctx, filter, update)
+		if err != nil {
+			errorResponse(rw, fmt.Errorf("failed to delete content"), 500)
+			return
+		}
+
+		if result.ModifiedCount == 0 {
+			errorResponse(rw, fmt.Errorf("content not found"), 404)
+			return
+		}
+
+		successResponse(rw, "Content deleted successfully")
+	}
+}

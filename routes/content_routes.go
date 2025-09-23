@@ -19,6 +19,7 @@ func ContentRoutes(router *mux.Router) {
 	router.HandleFunc("/uploadmicro/v1/editcontent/{Type}/{ContentID}/{Title}/{Description}/{Show}/{IsPayPerView}/{PPVPrice}/{IsDeleted}/{Tags}/{Posting}", controllers.EditContent()).Methods("PUT")
 	router.HandleFunc("/uploadmicro/v1/editcontent/{Type}/{ContentID}/{Show}/{IsPayPerView}/{PPVPrice}/{IsDeleted}/{Tags}", controllers.EditContentWithBody()).Methods("POST")
 	router.HandleFunc("/uploadmicro/v2/editcontent/{Type}/{ContentID}/{Show}/{IsPayPerView}/{PPVPrice}/{IsDeleted}/{Tags}/{Visibility}", controllers.EditContentWithBodyV2()).Methods("POST")
+	router.HandleFunc("/uploadmicro/v1/deletecontent/{ContentID}", controllers.DeleteContent()).Methods("DELETE")
 
 	router.HandleFunc("/uploadmicro/v1/repostRequest", controllers.RepostRequest()).Methods("POST")              // implemented notifications
 	router.HandleFunc("/uploadmicro/v1/approveRequest/{requestID}", controllers.ApproveRequest()).Methods("GET") // implemented notifications

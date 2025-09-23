@@ -24,18 +24,20 @@ func AddContentToFavorites() http.HandlerFunc {
 		contentID := vars["ContentID"]
 		album := vars["AlbumTitle"]
 		favorites := models.Favorite{}
+		var err error
 
 		res := favoritesCollection.FindOne(ctx, bson.M{"userid": userID})
 		if err := res.Decode(&favorites); err != nil {
 			if err != mongo.ErrNoDocuments {
-				errorResponse(rw, err, 200)
+				errorResponse(rw, err, 500)
 				return
 			}
+			// User doesn't exist, create new favorites document
 			favorites.UserID = userID
 			favorites.DateCreated = time.Now()
 			var albums []models.Album
 			albumObj := models.Album{}
-			if album != "" || album != " " {
+			if album != "" && album != " " {
 				albumObj.Title = album
 			} else {
 				albumObj.Title = "favorites"
@@ -46,14 +48,16 @@ func AddContentToFavorites() http.HandlerFunc {
 			favorites.Albums = albums
 			_, err := favoritesCollection.InsertOne(ctx, favorites)
 			if err != nil {
-				errorResponse(rw, err, 200)
+				errorResponse(rw, err, 500)
 				return
 			}
-			successResponse(rw, "OK")
+			successResponse(rw, "Content added to favorites successfully")
 			return
 		}
 		var index int
 		var albumExists bool
+		contentAlreadyExists := false
+
 		for i, v := range favorites.Albums {
 			if v.Title == album {
 				index = i
@@ -61,11 +65,20 @@ func AddContentToFavorites() http.HandlerFunc {
 			}
 			for _, c := range v.Content {
 				if c == contentID {
-					successResponse(rw, "content alredy is in favorites in: "+v.Title)
-					return
+					contentAlreadyExists = true
+					break
 				}
 			}
+			if contentAlreadyExists {
+				break
+			}
 		}
+
+		if contentAlreadyExists {
+			successResponse(rw, "Content already exists in favorites")
+			return
+		}
+
 		if albumExists {
 			favorites.Albums[index].Content = append(favorites.Albums[index].Content, contentID)
 		} else {
@@ -79,12 +92,14 @@ func AddContentToFavorites() http.HandlerFunc {
 			}
 			favorites.Albums = append(favorites.Albums, newAlbum)
 		}
-		updateResult, err := favoritesCollection.UpdateOne(ctx, bson.M{"userid": userID}, bson.M{"$set": bson.M{"albums": favorites.Albums}})
+
+		_, err = favoritesCollection.UpdateOne(ctx, bson.M{"userid": userID}, bson.M{"$set": bson.M{"albums": favorites.Albums}})
 		if err != nil {
-			errorResponse(rw, err, 200)
+			errorResponse(rw, err, 500)
 			return
 		}
-		successResponse(rw, updateResult.ModifiedCount)
+
+		successResponse(rw, "Content added to favorites successfully")
 	}
 }
 
@@ -96,27 +111,44 @@ func RemoveContentFromFavorites() http.HandlerFunc {
 		userID := vars["UserID"]
 		contentID := vars["ContentID"]
 		favorites := models.Favorite{}
+		var err error
+
 		res := favoritesCollection.FindOne(ctx, bson.M{"userid": userID})
 		if err := res.Decode(&favorites); err != nil {
-			if err != mongo.ErrNoDocuments {
-				errorResponse(rw, err, 200)
+			if err == mongo.ErrNoDocuments {
+				errorResponse(rw, fmt.Errorf("user has no favorites or doesn't exist"), 404)
 				return
 			}
+			errorResponse(rw, err, 500)
+			return
 		}
+
+		contentFound := false
 		for k, v := range favorites.Albums {
 			for j, content := range v.Content {
 				if content == contentID {
 					favorites.Albums[k].Content = append(favorites.Albums[k].Content[:j], favorites.Albums[k].Content[j+1:]...)
+					contentFound = true
 					break
 				}
 			}
+			if contentFound {
+				break
+			}
 		}
-		updateResult, err := favoritesCollection.UpdateOne(ctx, bson.M{"userid": userID}, bson.M{"$set": bson.M{"albums": favorites.Albums}})
-		if err != nil {
-			errorResponse(rw, err, 200)
+
+		if !contentFound {
+			errorResponse(rw, fmt.Errorf("content not found in favorites"), 404)
 			return
 		}
-		successResponse(rw, updateResult.ModifiedCount)
+
+		_, err = favoritesCollection.UpdateOne(ctx, bson.M{"userid": userID}, bson.M{"$set": bson.M{"albums": favorites.Albums}})
+		if err != nil {
+			errorResponse(rw, err, 500)
+			return
+		}
+
+		successResponse(rw, "Content removed from favorites successfully")
 	}
 }
 
@@ -209,6 +241,7 @@ func MoveFavorite() http.HandlerFunc {
 		toAlbum := vars["ToAlbum"]
 		contentID := vars["ContentID"]
 		favorites := models.Favorite{}
+		var err error
 		res := favoritesCollection.FindOne(ctx, bson.M{"userid": userID})
 		if err := res.Decode(&favorites); err != nil {
 			if err != mongo.ErrNoDocuments {
@@ -242,11 +275,11 @@ func MoveFavorite() http.HandlerFunc {
 			errorResponse(rw, fmt.Errorf("didn't remove the content from: ["+fromAblum+"] maybe the content or the album doesn't exist"), 200)
 			return
 		}
-		updateResult, err := favoritesCollection.UpdateOne(ctx, bson.M{"userid": userID}, bson.M{"$set": bson.M{"albums": favorites.Albums}})
+		_, err = favoritesCollection.UpdateOne(ctx, bson.M{"userid": userID}, bson.M{"$set": bson.M{"albums": favorites.Albums}})
 		if err != nil {
 			errorResponse(rw, err, 200)
 			return
 		}
-		successResponse(rw, updateResult.ModifiedCount)
+		successResponse(rw, "Content moved successfully")
 	}
 }

@@ -1637,11 +1637,13 @@ func StartStream() http.HandlerFunc {
 			rw.WriteHeader(http.StatusConflict)
 			errresponse := responses.ContentResponse{Status: http.StatusConflict, Message: "error"}
 			json.NewEncoder(rw).Encode(errresponse)
+			return
 		}
 
 		go func() {
 			time.Sleep(10 * time.Second)
-			sendLiveStartedNotification(userID)
+			contentID := result.InsertedID.(primitive.ObjectID).Hex()
+			sendLiveStartedNotification(userID, contentID)
 		}()
 
 		rw.WriteHeader(http.StatusCreated)
@@ -1708,11 +1710,13 @@ func StartStreamWithBody() http.HandlerFunc {
 			rw.WriteHeader(http.StatusConflict)
 			errresponse := responses.ContentResponse{Status: http.StatusConflict, Message: "error"}
 			json.NewEncoder(rw).Encode(errresponse)
+			return
 		}
 
 		go func() {
 			time.Sleep(10 * time.Second)
-			sendLiveStartedNotification(userID)
+			contentID := result.InsertedID.(primitive.ObjectID).Hex()
+			sendLiveStartedNotification(userID, contentID)
 		}()
 
 		rw.WriteHeader(http.StatusCreated)

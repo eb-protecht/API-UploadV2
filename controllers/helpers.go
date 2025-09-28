@@ -52,7 +52,7 @@ func sendNotificationWithData(userID, initiatorID, message, contentID string, no
 	configs.REDIS.Publish(configs.NOTIFICATIONCHANNEL(), jsonData)
 }
 
-func sendLiveStartedNotification(userID string) {
+func sendLiveStartedNotification(userID string, contentID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	followings := []models.Follow{}
@@ -64,7 +64,7 @@ func sendLiveStartedNotification(userID string) {
 		return
 	}
 	for _, v := range followings {
-		sendNotificationWithData(v.Follower, userID, "started Live Streaming 👁", "", models.LiveStreamingNotification, ctx)
+		sendNotificationWithData(v.Follower, userID, "started Live Streaming 👁", contentID, models.LiveStreamingNotification, ctx)
 	}
 }
 

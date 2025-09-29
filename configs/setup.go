@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis"
@@ -40,6 +41,20 @@ var REDIS *redis.Client
 
 // getting database collections
 func GetCollection(client *mongo.Client, collectionName string) *mongo.Collection {
+	// Extract database name from MongoDB URI
+	// URI format: mongodb://user:pass@host:port/database?options
+	uri := EnvMongoURI()
+	log.Printf("GetCollection: MongoDB URI: %s", uri)
+	// Simple parsing to extract database name
+	parts := strings.Split(uri, "/")
+	if len(parts) >= 4 {
+		dbName := strings.Split(parts[3], "?")[0] // Remove query parameters
+		log.Printf("GetCollection: extracted database name: %s, collection: %s", dbName, collectionName)
+		collection := client.Database(dbName).Collection(collectionName)
+		return collection
+	}
+	// Fallback to hardcoded name if parsing fails
+	log.Printf("GetCollection: failed to parse database name from URI, using fallback 'EyeCDB', collection: %s", collectionName)
 	collection := client.Database("EyeCDB").Collection(collectionName)
 	return collection
 }

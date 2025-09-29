@@ -21,6 +21,7 @@ func main() {
 	routes.FavoritesRoutes(router)
 	routes.TransferRoutes(router)
 	routes.PromotionRoutes(router)
+	routes.FeedbackRoutes(router)
 	configs.ConnectREDISDB()
 	router.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "OK")

@@ -173,4 +173,7 @@ func registerRoutes(router *mux.Router, logger *logrus.Entry) {
 
 	routes.FeedbackRoutes(router)
 	logger.Info("Feedback routes registered")
+
+	routes.MediaURLRoutes(router)
+	logger.Info("Media URL routes registered")
 }

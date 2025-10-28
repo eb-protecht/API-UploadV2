@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"image"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -19,6 +18,8 @@ import (
 	"upload-service/models"
 	"upload-service/responses"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/disintegration/imaging"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/google/uuid"
@@ -994,11 +995,190 @@ func PostPicWithBody() http.HandlerFunc {
 	}
 }
 
+// func PostVideo() http.HandlerFunc {
+// 	return func(rw http.ResponseWriter, r *http.Request) {
+
+// 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Minute)
+// 		defer cancel()
+// 		vars := mux.Vars(r)
+// 		userID := vars["UserID"]
+// 		title := vars["Title"]
+// 		description := vars["Description"]
+// 		tags := vars["Tags"]
+// 		show, _ := strconv.ParseBool(vars["Show"])
+// 		ispayperview, _ := strconv.ParseBool(vars["IsPayPerView"])
+// 		isdeleted, _ := strconv.ParseBool(vars["IsDeleted"])
+// 		extension := ""
+// 		thumbextension := ""
+// 		ffmpegSource := ""
+// 		ffmpegTarget := ""
+// 		newUuid := uuid.New()
+// 		ppvprice := vars["PPVPrice"]
+// 		price, err := strconv.ParseFloat(ppvprice, 64)
+// 		if err != nil {
+// 			fmt.Println("invalid price in PPVPrice")
+// 			price = 0
+// 		}
+
+// 		newPostVid := models.NewPostVideo{
+// 			UserID:       userID,
+// 			Title:        title,
+// 			Description:  description,
+// 			Location:     configs.EnvMediaDir() + "/" + userID + "/videos/",
+// 			DateCreated:  time.Now(),
+// 			Show:         show,
+// 			IsPayPerView: ispayperview,
+// 			IsDeleted:    isdeleted,
+// 			PPVPrice:     price,
+// 		}
+// 		newPostVid.Tags = strings.Split(tags, ",")
+// 		for i, s := range newPostVid.Tags {
+// 			newPostVid.Tags[i] = strings.Trim(s, " ")
+// 		}
+// 		fmt.Println("Creating folder ..." + newPostVid.Location)
+// 		var res = os.MkdirAll(newPostVid.Location, 0777)
+// 		if res != nil {
+// 			fmt.Println(res)
+// 		}
+// 		err = os.Chmod(configs.EnvMediaDir()+"/"+userID, 0666)
+// 		if err != nil {
+// 			fmt.Println(err)
+// 		}
+
+// 		err = os.Chmod(configs.EnvMediaDir()+"/"+userID+"/videos", 0666)
+// 		if err != nil {
+// 			fmt.Println(err)
+// 		}
+// 		var res1 = os.MkdirAll(newPostVid.Location+strings.Replace(newUuid.String(), "-", "", -1), 0777)
+// 		fmt.Println("Creating folder ..." + newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1))
+// 		if res1 != nil {
+// 			fmt.Println(res1)
+// 		}
+// 		err = os.Chmod(newPostVid.Location+strings.Replace(newUuid.String(), "-", "", -1), 0666)
+// 		if err != nil {
+// 			fmt.Println(err)
+// 		}
+
+// 		r.ParseMultipartForm(1024 * 20 * MB)
+// 		r.Body = http.MaxBytesReader(rw, r.Body, 1024*20*MB)
+// 		file, _, err := r.FormFile("video")
+// 		if err != nil {
+// 			fmt.Println(err)
+// 		}
+// 		thumb, _, err := r.FormFile("thumb")
+// 		if err != nil {
+// 			fmt.Println(err)
+// 		}
+
+// 		fileHeader := make([]byte, 512)
+// 		if _, err := file.Read(fileHeader); err != nil {
+// 			return
+// 		}
+// 		if _, err := file.Seek(0, 0); err != nil {
+// 			return
+// 		}
+
+// 		thumbHeader := make([]byte, 512)
+// 		if _, err := thumb.Read(thumbHeader); err != nil {
+// 			return
+// 		}
+// 		if _, err := thumb.Seek(0, 0); err != nil {
+// 			return
+// 		}
+
+// 		mime := http.DetectContentType(fileHeader)
+// 		mimeThumb := http.DetectContentType(thumbHeader)
+
+// 		fmt.Println(mime)
+// 		switch mime {
+// 		case "video/mp4":
+// 			extension = "mp4"
+// 		case "video/mkv":
+// 			extension = "mkv"
+// 		case "video/avi":
+// 			extension = "avi"
+// 		case "video/3gp":
+// 			extension = "3gp"
+// 		case "video/mov":
+// 			extension = "mov"
+// 		default:
+// 			http.Error(rw, "This file type for video is not allowed.", http.StatusBadRequest)
+// 			return
+// 		}
+// 		//deleting uploaded video after transcoding is finished
+// 		//defer CleanUp(newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1) + "." + extension)
+
+// 		//transcoding after all files are closed
+// 		ffmpegSource = newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1) + "." + extension
+// 		ffmpegTarget = newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1)
+// 		fmt.Println(ffmpegSource, ffmpegTarget)
+// 		//start transcoding process at the end of this method
+// 		/* command := []string{
+// 			"./script/create-vod-hls.sh",
+// 			ffmpegSource,
+// 			ffmpegTarget,
+// 		}
+// 		defer Execute("./script/create-vod-hls.sh", command) */
+// 		//end transcoding instructions
+// 		switch mimeThumb {
+// 		case "image/png":
+// 			thumbextension = "png"
+// 		case "image/jpeg":
+// 			thumbextension = "jpeg"
+// 		case "image/webp":
+// 			thumbextension = "webp"
+
+// 		default:
+// 			http.Error(rw, "This file type is not allowed for thumbnails", http.StatusBadRequest)
+// 			return
+// 		}
+
+// 		defer file.Close()
+// 		defer thumb.Close()
+
+// 		f, err := os.OpenFile(newPostVid.Location+strings.Replace(newUuid.String(), "-", "", -1)+"."+extension, os.O_WRONLY|os.O_CREATE, 0666)
+// 		if err != nil {
+// 			fmt.Println("Can't create a file for video at....")
+// 			fmt.Println("----" + newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1) + "." + extension + "----")
+// 			fmt.Println(err)
+// 		}
+// 		io.Copy(f, file)
+// 		defer f.Close()
+
+// 		srcPRT, _, err := image.Decode(thumb)
+// 		if err != nil {
+// 			fmt.Println(err)
+// 		}
+// 		srcPRT = imaging.Resize(srcPRT, 585, 0, imaging.Linear)
+// 		err = imaging.Save(srcPRT, newPostVid.Location+strings.Replace(newUuid.String(), "-", "", -1)+"thumb."+thumbextension)
+// 		if err != nil {
+// 			fmt.Println(err)
+// 		}
+
+// 		newPostVid.Location = newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1) + "/"
+// 		result, err := getVideosCollection().InsertOne(ctx, newPostVid)
+// 		fmt.Println(result)
+// 		if err != nil {
+// 			rw.WriteHeader(http.StatusInternalServerError)
+// 			response := responses.ContentResponse{Status: http.StatusInternalServerError, Message: "error", Data: map[string]interface{}{"data": err.Error()}}
+// 			json.NewEncoder(rw).Encode(response)
+// 			return
+// 		}
+// 		rw.WriteHeader(http.StatusCreated)
+// 		response := responses.ContentResponse{Status: http.StatusCreated, Message: "success", Data: map[string]interface{}{"data": result}}
+// 		json.NewEncoder(rw).Encode(response)
+
+// 	}
+// }
+
 func PostVideo() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
-
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Minute)
 		defer cancel()
+
+		fmt.Print("CHECKPOINT 1")
+
+		// Parse parameters
 		vars := mux.Vars(r)
 		userID := vars["UserID"]
 		title := vars["Title"]
@@ -1007,166 +1187,143 @@ func PostVideo() http.HandlerFunc {
 		show, _ := strconv.ParseBool(vars["Show"])
 		ispayperview, _ := strconv.ParseBool(vars["IsPayPerView"])
 		isdeleted, _ := strconv.ParseBool(vars["IsDeleted"])
-		extension := ""
-		thumbextension := ""
-		ffmpegSource := ""
-		ffmpegTarget := ""
-		newUuid := uuid.New()
 		ppvprice := vars["PPVPrice"]
 		price, err := strconv.ParseFloat(ppvprice, 64)
 		if err != nil {
-			fmt.Println("invalid price in PPVPrice")
+			fmt.Println("Invalid price in PPVPrice")
 			price = 0
 		}
 
+		// Generate unique video ID
+		newUuid := uuid.New()
+		videoID := strings.Replace(newUuid.String(), "-", "", -1)
+
+		// Parse multipart form
+		err = r.ParseMultipartForm(1024 * 20 * MB)
+		if err != nil {
+			http.Error(rw, "Error parsing form", http.StatusBadRequest)
+			return
+		}
+		r.Body = http.MaxBytesReader(rw, r.Body, 1024*20*MB)
+
+		// Get video file
+		file, _, err := r.FormFile("video")
+		if err != nil {
+			fmt.Println("Error getting video file:", err)
+			http.Error(rw, "Error reading video file", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		// Validate video file type
+		fileHeader := make([]byte, 512)
+		if _, err := file.Read(fileHeader); err != nil {
+			http.Error(rw, "Error reading file", http.StatusBadRequest)
+			return
+		}
+		if _, err := file.Seek(0, 0); err != nil {
+			http.Error(rw, "Error reading file", http.StatusBadRequest)
+			return
+		}
+
+		mime := http.DetectContentType(fileHeader)
+		extension := ""
+
+		fmt.Println("Video MIME type:", mime)
+		switch mime {
+		case "video/mp4":
+			extension = "mp4"
+		case "video/quicktime":
+			extension = "mov"
+		case "video/x-msvideo":
+			extension = "avi"
+		case "video/x-matroska":
+			extension = "mkv"
+		case "video/3gp":
+			extension = "3gp"
+		default:
+			http.Error(rw, "This file type for video is not allowed: "+mime, http.StatusBadRequest)
+			return
+		}
+
+		
+		uploader := configs.GetS3Uploader()
+
+		fmt.Print("UPLOADER>>", uploader)
+
+		// Upload raw video to S3
+		s3VideoKey := fmt.Sprintf("%s/%s.%s", userID, videoID, extension)
+		fmt.Printf("Uploading video to S3: s3://%s/%s\n", configs.EnvRawBucket(), s3VideoKey)
+
+		_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+			Bucket:      aws.String(configs.EnvRawBucket()),
+			Key:         aws.String(s3VideoKey),
+			Body:        file,
+			ContentType: aws.String(mime),
+		})
+		if err != nil {
+			fmt.Println("Error uploading video to S3:", err)
+			http.Error(rw, "Error uploading video to S3", http.StatusInternalServerError)
+			return
+		}
+		fmt.Println("✅ Video uploaded to S3 successfully")
+
+		/**
+		  insert a new metadata for video in the database
+		  HLSURL will be updated by the ec2 processor server in aws  along with status and thumbnail path
+		*/
 		newPostVid := models.NewPostVideo{
+			VideoID:      videoID,
 			UserID:       userID,
 			Title:        title,
 			Description:  description,
-			Location:     configs.EnvMediaDir() + "/" + userID + "/videos/",
+			S3RawKey:     s3VideoKey,
+			ThumbnailKey: "",
+			HLSURL:       "",
+			Status:       "processing",
 			DateCreated:  time.Now(),
 			Show:         show,
 			IsPayPerView: ispayperview,
 			IsDeleted:    isdeleted,
 			PPVPrice:     price,
 		}
+
+		// Parse tags
 		newPostVid.Tags = strings.Split(tags, ",")
 		for i, s := range newPostVid.Tags {
-			newPostVid.Tags[i] = strings.Trim(s, " ")
-		}
-		fmt.Println("Creating folder ..." + newPostVid.Location)
-		var res = os.MkdirAll(newPostVid.Location, 0777)
-		if res != nil {
-			fmt.Println(res)
-		}
-		err = os.Chmod(configs.EnvMediaDir()+"/"+userID, 0666)
-		if err != nil {
-			fmt.Println(err)
+			newPostVid.Tags[i] = strings.TrimSpace(s)
 		}
 
-		err = os.Chmod(configs.EnvMediaDir()+"/"+userID+"/videos", 0666)
-		if err != nil {
-			fmt.Println(err)
-		}
-		var res1 = os.MkdirAll(newPostVid.Location+strings.Replace(newUuid.String(), "-", "", -1), 0777)
-		fmt.Println("Creating folder ..." + newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1))
-		if res1 != nil {
-			fmt.Println(res1)
-		}
-		err = os.Chmod(newPostVid.Location+strings.Replace(newUuid.String(), "-", "", -1), 0666)
-		if err != nil {
-			fmt.Println(err)
-		}
+		fmt.Println("TEST MONGO BD INSERT")
 
-		r.ParseMultipartForm(1024 * 20 * MB)
-		r.Body = http.MaxBytesReader(rw, r.Body, 1024*20*MB)
-		file, _, err := r.FormFile("video")
-		if err != nil {
-			fmt.Println(err)
-		}
-		thumb, _, err := r.FormFile("thumb")
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		fileHeader := make([]byte, 512)
-		if _, err := file.Read(fileHeader); err != nil {
-			return
-		}
-		if _, err := file.Seek(0, 0); err != nil {
-			return
-		}
-
-		thumbHeader := make([]byte, 512)
-		if _, err := thumb.Read(thumbHeader); err != nil {
-			return
-		}
-		if _, err := thumb.Seek(0, 0); err != nil {
-			return
-		}
-
-		mime := http.DetectContentType(fileHeader)
-		mimeThumb := http.DetectContentType(thumbHeader)
-
-		fmt.Println(mime)
-		switch mime {
-		case "video/mp4":
-			extension = "mp4"
-		case "video/mkv":
-			extension = "mkv"
-		case "video/avi":
-			extension = "avi"
-		case "video/3gp":
-			extension = "3gp"
-		case "video/mov":
-			extension = "mov"
-		default:
-			http.Error(rw, "This file type for video is not allowed.", http.StatusBadRequest)
-			return
-		}
-		//deleting uploaded video after transcoding is finished
-		//defer CleanUp(newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1) + "." + extension)
-
-		//transcoding after all files are closed
-		ffmpegSource = newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1) + "." + extension
-		ffmpegTarget = newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1)
-		fmt.Println(ffmpegSource, ffmpegTarget)
-		//start transcoding process at the end of this method
-		/* command := []string{
-			"./script/create-vod-hls.sh",
-			ffmpegSource,
-			ffmpegTarget,
-		}
-		defer Execute("./script/create-vod-hls.sh", command) */
-		//end transcoding instructions
-		switch mimeThumb {
-		case "image/png":
-			thumbextension = "png"
-		case "image/jpeg":
-			thumbextension = "jpeg"
-		case "image/webp":
-			thumbextension = "webp"
-
-		default:
-			http.Error(rw, "This file type is not allowed for thumbnails", http.StatusBadRequest)
-			return
-		}
-
-		defer file.Close()
-		defer thumb.Close()
-
-		f, err := os.OpenFile(newPostVid.Location+strings.Replace(newUuid.String(), "-", "", -1)+"."+extension, os.O_WRONLY|os.O_CREATE, 0666)
-		if err != nil {
-			fmt.Println("Can't create a file for video at....")
-			fmt.Println("----" + newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1) + "." + extension + "----")
-			fmt.Println(err)
-		}
-		io.Copy(f, file)
-		defer f.Close()
-
-		srcPRT, _, err := image.Decode(thumb)
-		if err != nil {
-			fmt.Println(err)
-		}
-		srcPRT = imaging.Resize(srcPRT, 585, 0, imaging.Linear)
-		err = imaging.Save(srcPRT, newPostVid.Location+strings.Replace(newUuid.String(), "-", "", -1)+"thumb."+thumbextension)
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		newPostVid.Location = newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1) + "/"
+		
 		result, err := getVideosCollection().InsertOne(ctx, newPostVid)
-		fmt.Println(result)
+		fmt.Println("MongoDB insert result:", result)
 		if err != nil {
 			rw.WriteHeader(http.StatusInternalServerError)
-			response := responses.ContentResponse{Status: http.StatusInternalServerError, Message: "error", Data: map[string]interface{}{"data": err.Error()}}
+			response := responses.ContentResponse{
+				Status:  http.StatusInternalServerError,
+				Message: "error",
+				Data:    map[string]interface{}{"data": err.Error()},
+			}
 			json.NewEncoder(rw).Encode(response)
 			return
 		}
-		rw.WriteHeader(http.StatusCreated)
-		response := responses.ContentResponse{Status: http.StatusCreated, Message: "success", Data: map[string]interface{}{"data": result}}
-		json.NewEncoder(rw).Encode(response)
 
+		fmt.Println("TEST MONGO BD INSERT sucessss")
+
+		// Return success
+		rw.WriteHeader(http.StatusCreated)
+		response := responses.ContentResponse{
+			Status:  http.StatusCreated,
+			Message: "success",
+			Data: map[string]interface{}{
+				"video_id": videoID,
+				"status":   "processing",
+				"message":  "Video uploaded successfully and is being processed",
+			},
+		}
+		json.NewEncoder(rw).Encode(response)
 	}
 }
 
@@ -1437,9 +1594,9 @@ func PostVideoNT() http.HandlerFunc {
 
 func PostVideoNTWithBody() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
-
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Minute)
 		defer cancel()
+
 		vars := mux.Vars(r)
 		userID := vars["UserID"]
 		visibility := vars["Visibility"]
@@ -1447,41 +1604,107 @@ func PostVideoNTWithBody() http.HandlerFunc {
 		show, _ := strconv.ParseBool(vars["Show"])
 		ispayperview, _ := strconv.ParseBool(vars["IsPayPerView"])
 		isdeleted, _ := strconv.ParseBool(vars["IsDeleted"])
-		extension := ""
-		ffmpegSource := ""
-		ffmpegTarget := ""
-		newUuid := uuid.New()
 		ppvprice := vars["PPVPrice"]
 		price, err := strconv.ParseFloat(ppvprice, 64)
 		if err != nil {
-			fmt.Println("invalid price in PPVPrice")
 			price = 0
 		}
+
 		if visibility != VISIBILITY_FOLLOWERS {
 			visibility = VISIBILITY_EVERYONE
 		}
 
 		jsonData := r.FormValue("data")
 		if jsonData == "" {
-			errorResponse(rw, fmt.Errorf("missing data"), 200)
+			errorResponse(rw, fmt.Errorf("missing data"), 400)
 			return
 		}
 
 		var contentBody models.ContentBody
 		if err := json.Unmarshal([]byte(jsonData), &contentBody); err != nil {
-			errorResponse(rw, err, 200)
+			errorResponse(rw, err, 400)
 			return
 		}
 
 		title := contentBody.Title
 		description := contentBody.Description
 
+		// Generate unique video ID
+		videoID := strings.Replace(uuid.New().String(), "-", "", -1)
+
+		// Parse multipart form
+		r.ParseMultipartForm(1024 * 20 * MB)
+		r.Body = http.MaxBytesReader(rw, r.Body, 1024*20*MB)
+
+		file, fheader, err := r.FormFile("video")
+		if err != nil {
+			errorResponse(rw, fmt.Errorf("error reading video file"), 400)
+			return
+		}
+		defer file.Close()
+
+		fileHeader := make([]byte, 512)
+		file.Read(fileHeader)
+		file.Seek(0, 0)
+
+		mime := http.DetectContentType(fileHeader)
+		extension := ""
+
+		switch mime {
+		case "video/mp4":
+			extension = "mp4"
+		case "video/quicktime":
+			extension = "mov"
+		case "video/x-msvideo":
+			extension = "avi"
+		case "video/x-matroska":
+			extension = "mkv"
+		case "video/3gpp":
+			extension = "3gp"
+		case "video/hevc", "video/h265":
+			extension = "hevc"
+		case "application/octet-stream":
+			ext := strings.ToLower(filepath.Ext(fheader.Filename))
+			switch ext {
+			case ".mp4", ".mkv", ".avi", ".3gp", ".mov", ".hevc", ".h265", ".265":
+				extension = ext[1:]
+			default:
+				http.Error(rw, "Invalid video file type", http.StatusBadRequest)
+				return
+			}
+		default:
+			http.Error(rw, "Invalid video file type", http.StatusBadRequest)
+			return
+		}
+
+		uploader := configs.GetS3Uploader()
+		s3VideoKey := fmt.Sprintf("%s/%s.%s", userID, videoID, extension)
+
+		fmt.Printf("Uploading video to S3: s3://%s/%s\n", configs.EnvRawBucket(), s3VideoKey)
+
+		_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+			Bucket:      aws.String(configs.EnvRawBucket()),
+			Key:         aws.String(s3VideoKey),
+			Body:        file,
+			ContentType: aws.String(mime),
+		})
+		if err != nil {
+			fmt.Println("Error uploading to S3:", err)
+			errorResponse(rw, fmt.Errorf("error uploading video"), 500)
+			return
+		}
+		fmt.Println("Video uploaded to S3")
+
+		
 		newPostVid := models.Content{
+			VideoID:      videoID,
 			UserID:       userID,
 			Poster:       userID,
 			Title:        title,
 			Description:  description,
-			Location:     configs.EnvMediaDir() + "/" + userID + "/videos/",
+			S3RawKey:     s3VideoKey,
+			ThumbnailKey: "",
+			HLSURL:       "",
 			DateCreated:  time.Now(),
 			Show:         show,
 			IsPayPerView: ispayperview,
@@ -1492,111 +1715,36 @@ func PostVideoNTWithBody() http.HandlerFunc {
 			Visibility:   visibility,
 			Transcoding:  TRANSCODING_PENDING,
 		}
+
 		newPostVid.Tags = strings.Split(tags, ",")
 		for i, s := range newPostVid.Tags {
-			newPostVid.Tags[i] = strings.Trim(s, " ")
-		}
-		fmt.Println("Creating folder ..." + newPostVid.Location)
-		var res = os.MkdirAll(newPostVid.Location, 0777)
-		if res != nil {
-			fmt.Println(res)
-		}
-		err = os.Chmod(configs.EnvMediaDir()+"/"+userID, 0666)
-		if err != nil {
-			fmt.Println(err)
+			newPostVid.Tags[i] = strings.TrimSpace(s)
 		}
 
-		err = os.Chmod(configs.EnvMediaDir()+"/"+userID+"/videos", 0666)
-		if err != nil {
-			fmt.Println(err)
-		}
-		var res1 = os.MkdirAll(newPostVid.Location+strings.Replace(newUuid.String(), "-", "", -1), 0777)
-		fmt.Println("Creating folder ..." + newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1))
-		if res1 != nil {
-			fmt.Println(res1)
-		}
-		err = os.Chmod(newPostVid.Location+strings.Replace(newUuid.String(), "-", "", -1), 0666)
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		r.ParseMultipartForm(1024 * 20 * MB)
-		r.Body = http.MaxBytesReader(rw, r.Body, 1024*20*MB)
-		file, fheader, err := r.FormFile("video")
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		fileHeader := make([]byte, 512)
-		if _, err := file.Read(fileHeader); err != nil {
-			return
-		}
-		if _, err := file.Seek(0, 0); err != nil {
-			return
-		}
-
-		mime := http.DetectContentType(fileHeader)
-
-		fmt.Println(mime)
-		switch mime {
-		case "video/mp4":
-			extension = "mp4"
-		case "video/mkv":
-			extension = "mkv"
-		case "video/avi":
-			extension = "avi"
-		case "video/3gp":
-			extension = "3gp"
-		case "video/mov":
-			extension = "mov"
-		case "video/hevc", "video/h265":
-			extension = "hevc"
-		case "application/octet-stream":
-			// MIME sniffer couldn’t decide – trust the filename
-			ext := strings.ToLower(filepath.Ext(fheader.Filename)) // “.mp4”, “.h265”, …
-			switch ext {
-			case ".mp4", ".mkv", ".avi", ".3gp", ".mov",
-				".hevc", ".h265", ".265":
-				extension = ext[1:] // strip the leading “.”
-			default:
-				http.Error(rw, "This file type for video is not allowed.", http.StatusBadRequest)
-				return
-			}
-
-		default:
-			http.Error(rw, "This file type for video is not allowed.", http.StatusBadRequest)
-			return
-		}
-
-		ffmpegSource = newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1) + "." + extension
-		ffmpegTarget = newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1)
-		fmt.Println(ffmpegSource, ffmpegTarget)
-
-		defer file.Close()
-
-		f, err := os.OpenFile(configs.INITMEDIADIR()+userID+"-"+strings.Replace(newUuid.String(), "-", "", -1)+"."+extension, os.O_WRONLY|os.O_CREATE, 0666)
-		if err != nil {
-			fmt.Println("Can't create a file for video at....")
-			fmt.Println("----" + newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1) + "." + extension + "----")
-			fmt.Println(err)
-		}
-		io.Copy(f, file)
-		defer f.Close()
-
-		newPostVid.Location = newPostVid.Location + strings.Replace(newUuid.String(), "-", "", -1) + "/"
 		result, err := getContentCollection().InsertOne(ctx, newPostVid)
-		fmt.Println(result)
 		if err != nil {
 			rw.WriteHeader(http.StatusInternalServerError)
-			response := responses.ContentResponse{Status: http.StatusInternalServerError, Message: "error", Data: map[string]interface{}{"data": err.Error()}}
+			response := responses.ContentResponse{
+				Status:  http.StatusInternalServerError,
+				Message: "error",
+				Data:    map[string]interface{}{"data": err.Error()},
+			}
 			json.NewEncoder(rw).Encode(response)
 			return
 		}
-		rw.WriteHeader(http.StatusCreated)
-		response := responses.ContentResponse{Status: http.StatusCreated, Message: "success", Data: map[string]interface{}{"data": result}}
-		json.NewEncoder(rw).Encode(response)
-		//go insertInREDISGetContentByUserID(userID)
 
+		fmt.Print(result)
+
+		rw.WriteHeader(http.StatusCreated)
+		response := responses.ContentResponse{
+			Status:  http.StatusCreated,
+			Message: "success",
+			Data: map[string]interface{}{
+				"video_id": videoID,
+				"status":   "processing",
+			},
+		}
+		json.NewEncoder(rw).Encode(response)
 	}
 }
 

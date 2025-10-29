@@ -63,6 +63,10 @@ func ConnectAWS() error {
 	secretKey := EnvAWSSecretKey()
 	region := EnvAWSRegion()
 
+	fmt.Println("accessKey:", accessKey)
+   fmt.Println("secretKey:", secretKey)
+    fmt.Println("region:", region)
+
 	if accessKey == "" || secretKey == "" {
 		return fmt.Errorf("AWS credentials not found in environment variables")
 	}

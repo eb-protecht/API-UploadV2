@@ -1,4 +1,4 @@
-FROM FROM golang:alpine AS builder
+FROM golang:alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates bash

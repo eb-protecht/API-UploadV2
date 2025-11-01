@@ -438,9 +438,30 @@ func EditContentWithBodyV2() http.HandlerFunc {
 	}
 }
 
+func deleteFromS3(bucketName, S3RawKey string) error {
+	if S3RawKey == "" {
+		return nil
+	}
+	
+	ctx := context.Background()
+	client := configs.GetS3Client()
+	
+	_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(S3RawKey),
+	})
+	
+	if err != nil {
+		fmt.Println("Error deleting from S3:", err)
+		return err
+	}
+	
+	fmt.Println("Deleted from S3:", S3RawKey)
+	return nil
+}
+
 func PostProfilePic() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
-
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
@@ -448,24 +469,9 @@ func PostProfilePic() http.HandlerFunc {
 		userID := vars["UserID"]
 		iscurrent, _ := strconv.ParseBool(vars["IsCurrent"])
 		isdeleted, _ := strconv.ParseBool(vars["IsDeleted"])
-		extension := ""
-		newUuid := uuid.New()
 
-		newPostPic := models.NewProfilePic{
-			UserID:      userID,
-			Location:    configs.EnvMediaDir() + "/" + userID + "/pics/profile/",
-			DateCreated: time.Now(),
-			IsCurrent:   iscurrent,
-			IsDeleted:   isdeleted,
-		}
-
-		// Ensure directory exists
-		if err := os.MkdirAll(newPostPic.Location, 0777); err != nil {
-			fmt.Println("MkdirAll error:", err)
-		}
-		if err := os.Chmod(newPostPic.Location, 0666); err != nil {
-			fmt.Println("Chmod error:", err)
-		}
+		// Generate unique ID
+		imageID := strings.Replace(uuid.New().String(), "-", "", -1)
 
 		// Parse form
 		r.ParseMultipartForm(10 * MB)
@@ -474,12 +480,12 @@ func PostProfilePic() http.HandlerFunc {
 		// Retrieve file from form
 		file, _, err := r.FormFile("file")
 		if err != nil {
-			errorResponse(rw, err, http.StatusInternalServerError)
+			errorResponse(rw, err, http.StatusBadRequest)
 			return
 		}
 		defer file.Close()
 
-		// --- CHANGED: Read the entire file for detection ---
+		// Read the entire file for detection
 		fileBytes, err := io.ReadAll(file)
 		if err != nil {
 			fmt.Println("failed to read file data:", err)
@@ -487,12 +493,12 @@ func PostProfilePic() http.HandlerFunc {
 			return
 		}
 
-		// Detect MIME using mimetype
+		// Detect MIME
 		detectedMIME := mimetype.Detect(fileBytes)
 		mimeType := detectedMIME.String()
 		fmt.Println("Detected MIME:", mimeType)
 
-		// Switch on the detected MIME
+		extension := ""
 		switch mimeType {
 		case "image/png":
 			extension = "png"
@@ -502,32 +508,61 @@ func PostProfilePic() http.HandlerFunc {
 			extension = "webp"
 		case "image/heic", "image/heif":
 			extension = "heic"
-
 		default:
 			http.Error(rw, "This file type is not allowed for images", http.StatusBadRequest)
 			return
 		}
 
-		if _, err := file.Seek(0, 0); err != nil {
-			fmt.Println("Seek error:", err)
-			errorResponse(rw, err, http.StatusInternalServerError)
-			return
+		// If setting as current, delete old current profile pic from S3
+		if iscurrent {
+			var oldPic models.NewProfilePic
+			err := getProfilePicsCollection().FindOne(ctx, bson.M{
+				"userid":    userID,
+				"iscurrent": true,
+			}).Decode(&oldPic)
+
+			if err == nil && oldPic.S3RawKey != "" {
+				// Delete old file from S3
+				deleteFromS3(configs.EnvPicturesBucket(), oldPic.S3RawKey)
+
+				// Mark as not current in DB
+				getProfilePicsCollection().UpdateOne(ctx,
+					bson.M{"_id": oldPic.ID},
+					bson.M{"$set": bson.M{"iscurrent": false}},
+				)
+			}
 		}
 
-		outPath := newPostPic.Location + strings.Replace(newUuid.String(), "-", "", -1) + "." + extension
-		f, err := os.OpenFile(outPath, os.O_WRONLY|os.O_CREATE, 0666)
+
+		uploader := configs.GetS3Uploader()
+		S3RawKey := fmt.Sprintf("%s/profile/%s.%s", userID, imageID, extension)
+
+		fmt.Printf("Uploading profile pic to S3: s3://%s/%s\n", configs.EnvPicturesBucket(), S3RawKey)
+
+		_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+			Bucket:      aws.String(configs.EnvPicturesBucket()),
+			Key:         aws.String(S3RawKey),
+			Body:        bytes.NewReader(fileBytes),
+			ContentType: aws.String(mimeType),
+		})
 		if err != nil {
-			errorResponse(rw, err, http.StatusInternalServerError)
+			fmt.Println("Error uploading to S3:", err)
+			errorResponse(rw, fmt.Errorf("error uploading profile pic"), 500)
 			return
 		}
-		defer f.Close()
+		fmt.Println("Profile pic uploaded to S3")
 
-		if _, err := io.Copy(f, file); err != nil {
-			errorResponse(rw, err, http.StatusInternalServerError)
-			return
+	
+		profilePicURL := configs.EnvCDNURL() + "/" + S3RawKey
+
+		newPostPic := models.NewProfilePic{
+			UserID:      userID,
+			Location:    profilePicURL,
+			S3RawKey:       S3RawKey,
+			DateCreated: time.Now(),
+			IsCurrent:   iscurrent,
+			IsDeleted:   isdeleted,
 		}
-
-		newPostPic.Location = outPath
 
 		result, err := getProfilePicsCollection().InsertOne(ctx, newPostPic)
 		if err != nil {
@@ -546,78 +581,131 @@ func PostProfilePic() http.HandlerFunc {
 }
 
 func uploadProfilePic(userID string, file multipart.File, fileHeader *multipart.FileHeader, filename string) (string, error) {
-	folderPath := configs.EnvMediaDir() + "/" + userID + "/profile_pics/"
-	if _, err := os.Stat(folderPath); os.IsNotExist(err) {
-		err := os.MkdirAll(folderPath, 0755)
-		if err != nil {
-			return "", err
-		}
-	}
-	filename += "." + strings.Split(fileHeader.Filename, ".")[1]
-	fullpath := filepath.Join(folderPath, filename)
-	dst, err := os.Create(fullpath)
+	ctx := context.Background()
+
+	// Read file
+	fileBytes, err := io.ReadAll(file)
 	if err != nil {
 		return "", err
 	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
+
+	// Detect extension
+	detectedMIME := mimetype.Detect(fileBytes)
+	mimeType := detectedMIME.String()
+
+	extension := ""
+	switch mimeType {
+	case "image/png":
+		extension = "png"
+	case "image/jpeg":
+		extension = "jpeg"
+	case "image/webp":
+		extension = "webp"
+	case "image/heic", "image/heif":
+		extension = "heic"
+	default:
+		extension = strings.Split(fileHeader.Filename, ".")[1]
+	}
+
+	// Upload to S3
+	uploader := configs.GetS3Uploader()
+	s3Key := fmt.Sprintf("%s/profile/%s.%s", userID, filename, extension)
+
+	_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(configs.EnvPicturesBucket()),
+		Key:         aws.String(s3Key),
+		Body:        bytes.NewReader(fileBytes),
+		ContentType: aws.String(mimeType),
+	})
+	if err != nil {
 		return "", err
 	}
-	return fullpath, nil
+
+	return configs.EnvCDNURL() + "/" + s3Key, nil
 }
 
 func PostProfilePicBase64() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		
 		vars := mux.Vars(r)
 		userID := vars["UserID"]
 		oid, err := primitive.ObjectIDFromHex(userID)
 		if err != nil {
-			errorResponse(rw, fmt.Errorf("invalid userID"), 200)
+			errorResponse(rw, fmt.Errorf("invalid userID"), 400)
 			return
 		}
+		
 		iscurrent, _ := strconv.ParseBool(vars["IsCurrent"])
+		
 		r.ParseMultipartForm(10 * MB)
 		r.Body = http.MaxBytesReader(rw, r.Body, 10*MB)
+		
 		file, fileHeader, err := r.FormFile("file")
+		if err != nil {
+			errorResponse(rw, err, 400)
+			return
+		}
+		defer file.Close()
+		
+		profileID := primitive.NewObjectID()
+		
+		// uploadProfilePic now returns CDN URL and uploads to S3
+		location, err := uploadProfilePic(userID, file, fileHeader, profileID.Hex())
 		if err != nil {
 			errorResponse(rw, err, 500)
 			return
 		}
-		defer file.Close()
-		profileID := primitive.NewObjectID()
-		location, err := uploadProfilePic(userID, file, fileHeader, profileID.Hex())
-		if err != nil {
-			errorResponse(rw, err, 200)
-			return
+		
+		// If setting as current, delete old current profile pic from S3
+		if iscurrent {
+			var oldPic models.NewProfilePic
+			err := getProfilePicsCollection().FindOne(ctx, bson.M{
+				"userid":    userID,
+				"iscurrent": true,
+			}).Decode(&oldPic)
+
+			if err == nil && oldPic.S3RawKey != "" {
+				deleteFromS3(configs.EnvPicturesBucket(), oldPic.S3RawKey)
+			}
+			
+			// Mark old pics as not current
+			getProfilePicsCollection().UpdateMany(ctx, 
+				bson.M{"userid": userID, "iscurrent": true},
+				bson.M{"$set": bson.M{"iscurrent": false}},
+			)
+			
+			// Update user's profile_pic field
+			getUsersCollection().UpdateOne(ctx, 
+				bson.M{"_id": oid}, 
+				bson.M{"$set": bson.M{"profile_pic": location}},
+			)
 		}
+		
 		newPostPic := models.NewProfilePic{
 			ID:          profileID,
 			UserID:      userID,
 			Location:    location,
+			S3RawKey:       fmt.Sprintf("%s/profile/%s", userID, profileID.Hex()), // Assuming uploadProfilePic uses this pattern
 			Filename:    profileID.Hex(),
 			DateCreated: time.Now(),
 			IsCurrent:   iscurrent,
 			IsDeleted:   false,
 		}
+		
 		result, err := getProfilePicsCollection().InsertOne(ctx, newPostPic)
 		if err != nil {
 			errorResponse(rw, err, 500)
 			return
 		}
-		if iscurrent {
-			filterByCurrent := bson.M{"userid": userID, "iscurrent": true}
-			getProfilePicsCollection().UpdateOne(ctx, filterByCurrent, bson.M{"$set": bson.M{"iscurrent": false}})
-			getUsersCollection().UpdateOne(ctx, bson.M{"_id": oid}, bson.M{"$set": bson.M{"profile_pic": location}})
-		}
+		
 		successResponse(rw, result)
 	}
 }
 
 func PostPic() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
-
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
@@ -641,33 +729,8 @@ func PostPic() http.HandlerFunc {
 			visibility = VISIBILITY_EVERYONE
 		}
 
-		newUuid := uuid.New()
-		newPostPic := models.Content{
-			UserID:       userID,
-			Poster:       userID,
-			Title:        title,
-			Description:  description,
-			Location:     configs.EnvMediaDir() + "/" + userID + "/pics/",
-			DateCreated:  time.Now(),
-			Show:         show,
-			IsPayPerView: ispayperview,
-			IsDeleted:    isdeleted,
-			PPVPrice:     price,
-			Type:         TYPE_PIC,
-			Posting:      "",
-			Visibility:   visibility,
-		}
-		newPostPic.Tags = strings.Split(tags, ",")
-		for i, s := range newPostPic.Tags {
-			newPostPic.Tags[i] = strings.TrimSpace(s)
-		}
-
-		if err := os.MkdirAll(newPostPic.Location, 0777); err != nil {
-			fmt.Println(err)
-		}
-		if err := os.Chmod(newPostPic.Location, 0666); err != nil {
-			fmt.Println(err)
-		}
+		// Generate unique ID
+		imageID := strings.Replace(uuid.New().String(), "-", "", -1)
 
 		r.ParseMultipartForm(10 * MB)
 		r.Body = http.MaxBytesReader(rw, r.Body, 10*MB)
@@ -675,16 +738,16 @@ func PostPic() http.HandlerFunc {
 		file, _, err := r.FormFile("file")
 		if err != nil {
 			fmt.Println("Error reading form file:", err)
-			http.Error(rw, "Missing file", http.StatusBadRequest)
+			errorResponse(rw, err, 400)
 			return
 		}
 		defer file.Close()
 
-		// Read the entire upload into memory for detection
+		// Read the entire file for MIME detection
 		fileBytes, err := io.ReadAll(file)
 		if err != nil {
 			fmt.Println("Failed to read file data:", err)
-			http.Error(rw, "Failed to read file data", http.StatusInternalServerError)
+			errorResponse(rw, fmt.Errorf("failed to read file"), 500)
 			return
 		}
 
@@ -693,7 +756,6 @@ func PostPic() http.HandlerFunc {
 		mimeType := detectedMIME.String()
 		fmt.Println("Detected MIME:", mimeType)
 
-		// Set extension based on MIME
 		extension := ""
 		switch mimeType {
 		case "image/png":
@@ -709,72 +771,97 @@ func PostPic() http.HandlerFunc {
 			return
 		}
 
-		// Reset file pointer so we can copy to disk
-		if _, err := file.Seek(0, 0); err != nil {
-			fmt.Println("Seek error:", err)
-			http.Error(rw, "Internal error", http.StatusInternalServerError)
-			return
-		}
+		// Upload original to S3
+		uploader := configs.GetS3Uploader()
+		s3OriginalKey := fmt.Sprintf("%s/%s.%s", userID, imageID, extension)
 
-		// Create the original file
-		originalFileName := strings.ReplaceAll(newUuid.String(), "-", "") + "." + extension
-		originalPath := newPostPic.Location + originalFileName
+		fmt.Printf("Uploading original image to S3: s3://%s/%s\n", configs.EnvPicturesBucket(), s3OriginalKey)
 
-		f, err := os.OpenFile(originalPath, os.O_WRONLY|os.O_CREATE, 0666)
+		_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+			Bucket:      aws.String(configs.EnvPicturesBucket()),
+			Key:         aws.String(s3OriginalKey),
+			Body:        bytes.NewReader(fileBytes),
+			ContentType: aws.String(mimeType),
+		})
 		if err != nil {
-			fmt.Println("Error creating original file:", err)
-			http.Error(rw, "Failed to create file", http.StatusInternalServerError)
+			fmt.Println("Error uploading original to S3:", err)
+			errorResponse(rw, fmt.Errorf("error uploading image"), 500)
 			return
 		}
-		defer f.Close()
+		fmt.Println("Original image uploaded to S3")
 
-		// Save the original file
-		if _, err := io.Copy(f, file); err != nil {
-			fmt.Println("Error copying to original file:", err)
-			http.Error(rw, "Failed to save file", http.StatusInternalServerError)
-			return
-		}
-
-		// Now create the thumbnail
-		thumbFileName := strings.ReplaceAll(newUuid.String(), "-", "") + "thumb." + extension
-		thumbPath := newPostPic.Location + thumbFileName
-
+		// Generate and upload thumbnail
+		var s3ThumbnailKey string
 		if mimeType == "image/heic" || mimeType == "image/heif" {
-			// === HEIC/HEIF branch: skip resizing, just copy original to thumb
-			originalIn, err := os.Open(originalPath)
-			if err != nil {
-				fmt.Println("Error opening original for thumb copy:", err)
-				return
-			}
-			defer originalIn.Close()
-
-			thumbOut, err := os.Create(thumbPath)
-			if err != nil {
-				fmt.Println("Error creating thumb file:", err)
-				return
-			}
-			defer thumbOut.Close()
-
-			if _, err := io.Copy(thumbOut, originalIn); err != nil {
-				fmt.Println("Error copying thumb file:", err)
-				return
-			}
+			// For HEIC, use original as thumbnail
+			s3ThumbnailKey = s3OriginalKey
 		} else {
-			// === Non-HEIC branch: decode & resize using imaging
-			src, err := imaging.Open(originalPath)
+			// Decode and resize
+			img, err := imaging.Decode(bytes.NewReader(fileBytes))
 			if err != nil {
-				fmt.Println("Error opening file for imaging:", err)
-				// You might choose to skip or return here
+				fmt.Println("Error decoding image:", err)
+				s3ThumbnailKey = s3OriginalKey // Fallback to original
 			} else {
-				thumb := imaging.Resize(src, 585, 0, imaging.Linear)
-				if err := imaging.Save(thumb, thumbPath); err != nil {
-					fmt.Println("Error saving thumbnail:", err)
+				thumbnail := imaging.Resize(img, 585, 0, imaging.Linear)
+
+				var thumbBuf bytes.Buffer
+				switch extension {
+				case "jpeg":
+					imaging.Encode(&thumbBuf, thumbnail, imaging.JPEG)
+				case "png":
+					imaging.Encode(&thumbBuf, thumbnail, imaging.PNG)
+				case "webp":
+					imaging.Encode(&thumbBuf, thumbnail, imaging.JPEG)
+				default:
+					imaging.Encode(&thumbBuf, thumbnail, imaging.JPEG)
+				}
+
+				s3ThumbnailKey = fmt.Sprintf("%s/%s_thumb.%s", userID, imageID, extension)
+
+				fmt.Printf("Uploading thumbnail to S3: s3://%s/%s\n", configs.EnvPicturesBucket(), s3ThumbnailKey)
+
+				_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+					Bucket:      aws.String(configs.EnvPicturesBucket()),
+					Key:         aws.String(s3ThumbnailKey),
+					Body:        &thumbBuf,
+					ContentType: aws.String(mimeType),
+				})
+				if err != nil {
+					fmt.Println("Error uploading thumbnail:", err)
+					s3ThumbnailKey = s3OriginalKey // Fallback
+				} else {
+					fmt.Println("Thumbnail uploaded to S3")
 				}
 			}
 		}
 
-		// Update location for the original
-		newPostPic.Location = originalPath
+		// Build CDN URLs
+		cdnURL := configs.EnvCDNURL()
+		originalURL := cdnURL + "/" + s3OriginalKey
+		thumbnailURL := cdnURL + "/" + s3ThumbnailKey
+
+		newPostPic := models.Content{
+			UserID:       userID,
+			Poster:       userID,
+			Title:        title,
+			Description:  description,
+			Location:     originalURL,
+			Posting:      thumbnailURL,
+			S3RawKey:        s3OriginalKey,
+			ThumbnailKey: s3ThumbnailKey,
+			DateCreated:  time.Now(),
+			Show:         show,
+			IsPayPerView: ispayperview,
+			IsDeleted:    isdeleted,
+			PPVPrice:     price,
+			Type:         TYPE_PIC,
+			Visibility:   visibility,
+		}
+
+		newPostPic.Tags = strings.Split(tags, ",")
+		for i, s := range newPostPic.Tags {
+			newPostPic.Tags[i] = strings.TrimSpace(s)
+		}
 
 		// Insert to DB
 		result, err := getContentCollection().InsertOne(ctx, newPostPic)

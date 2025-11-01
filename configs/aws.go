@@ -39,6 +39,15 @@ func EnvRawBucket() string {
 	return bucket
 }
 
+func EnvPicturesBucket() string {
+	bucket := os.Getenv("PICTURES_BUCKET")
+	if bucket == "" {
+		return "syn-pictures"
+	}
+	return bucket
+}
+
+
 func EnvProcessedBucket() string {
 	bucket := os.Getenv("PROCESSED_BUCKET")
 	if bucket == "" {

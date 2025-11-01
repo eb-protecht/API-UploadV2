@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -802,7 +803,6 @@ func PostPic() http.HandlerFunc {
 
 func PostPicWithBody() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
-
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
@@ -820,57 +820,30 @@ func PostPicWithBody() http.HandlerFunc {
 			price = 0
 		}
 
+		if visibility != VISIBILITY_FOLLOWERS {
+			visibility = VISIBILITY_EVERYONE
+		}
+
 		// Read JSON from formValue("data")
 		jsonData := r.FormValue("data")
 		if jsonData == "" {
-			errorResponse(rw, fmt.Errorf("missing data"), 200)
+			errorResponse(rw, fmt.Errorf("missing data"), 400)
 			return
 		}
 
 		var contentBody models.ContentBody
 		if err := json.Unmarshal([]byte(jsonData), &contentBody); err != nil {
-			errorResponse(rw, err, 200)
+			errorResponse(rw, err, 400)
 			return
 		}
 
 		title := contentBody.Title
 		description := contentBody.Description
 
-		if visibility != VISIBILITY_FOLLOWERS {
-			visibility = VISIBILITY_EVERYONE
-		}
+		// Generate unique ID
+		imageID := strings.Replace(uuid.New().String(), "-", "", -1)
 
-		newUuid := uuid.New()
-
-		newPostPic := models.Content{
-			UserID:       userID,
-			Poster:       userID,
-			Title:        title,
-			Description:  description,
-			Location:     configs.EnvMediaDir() + "/" + userID + "/pics/",
-			DateCreated:  time.Now(),
-			Show:         show,
-			IsPayPerView: ispayperview,
-			IsDeleted:    isdeleted,
-			PPVPrice:     price,
-			Type:         TYPE_PIC,
-			Posting:      "",
-			Visibility:   visibility,
-		}
-		newPostPic.Tags = strings.Split(tags, ",")
-		for i, s := range newPostPic.Tags {
-			newPostPic.Tags[i] = strings.TrimSpace(s)
-		}
-
-		// Ensure directory exists
-		if err := os.MkdirAll(newPostPic.Location, 0777); err != nil {
-			fmt.Println(err)
-		}
-		if err := os.Chmod(newPostPic.Location, 0666); err != nil {
-			fmt.Println(err)
-		}
-
-		// Parse form and limit body
+		// Parse multipart form
 		r.ParseMultipartForm(10 * MB)
 		r.Body = http.MaxBytesReader(rw, r.Body, 10*MB)
 
@@ -878,6 +851,8 @@ func PostPicWithBody() http.HandlerFunc {
 		file, _, err := r.FormFile("file")
 		if err != nil {
 			fmt.Println(err)
+			errorResponse(rw, err, 400)
+			return
 		}
 		defer file.Close()
 
@@ -885,7 +860,7 @@ func PostPicWithBody() http.HandlerFunc {
 		fileBytes, err := io.ReadAll(file)
 		if err != nil {
 			fmt.Println("failed to read file data:", err)
-			http.Error(rw, "Failed to read file data", http.StatusInternalServerError)
+			errorResponse(rw, fmt.Errorf("failed to read file"), 500)
 			return
 		}
 
@@ -910,65 +885,95 @@ func PostPicWithBody() http.HandlerFunc {
 			return
 		}
 
-		if _, err := file.Seek(0, 0); err != nil {
-			fmt.Println(err)
+		
+		uploader := configs.GetS3Uploader()
+		s3OriginalKey := fmt.Sprintf("%s/%s.%s", userID, imageID, extension)
+
+		fmt.Printf("Uploading original image to S3: s3://%s/%s\n", configs.EnvPicturesBucket(), s3OriginalKey)
+
+		_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+			Bucket:      aws.String(configs.EnvPicturesBucket()),
+			Key:         aws.String(s3OriginalKey),
+			Body:        bytes.NewReader(fileBytes),
+			ContentType: aws.String(mimeType),
+		})
+		if err != nil {
+			fmt.Println("Error uploading original to S3:", err)
+			errorResponse(rw, fmt.Errorf("error uploading image"), 500)
 			return
 		}
+		fmt.Println("Original image uploaded to S3")
 
-		// Construct original path
-		originalName := strings.Replace(newUuid.String(), "-", "", -1) + "." + extension
-		originalPath := newPostPic.Location + originalName
-
-		// Save original
-		f, err := os.OpenFile(originalPath, os.O_WRONLY|os.O_CREATE, 0666)
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer f.Close()
-		io.Copy(f, file)
-
-		// Construct thumbnail path
-		thumbName := strings.Replace(newUuid.String(), "-", "", -1) + "thumb." + extension
-		thumbPath := newPostPic.Location + thumbName
-
-		// If HEIC/HEIF => skip resizing, just copy the original
+		var s3ThumbnailKey string
 		if mimeType == "image/heic" || mimeType == "image/heif" {
-
-			// Reopen original to copy
-			origIn, err := os.Open(originalPath)
-			if err != nil {
-				fmt.Println("Error opening original for thumb copy:", err)
-				return
-			}
-			defer origIn.Close()
-
-			thumbOut, err := os.Create(thumbPath)
-			if err != nil {
-				fmt.Println("Error creating thumb file:", err)
-				return
-			}
-			defer thumbOut.Close()
-
-			if _, err := io.Copy(thumbOut, origIn); err != nil {
-				fmt.Println("Error copying thumb:", err)
-				return
-			}
-
+			s3ThumbnailKey = s3OriginalKey
 		} else {
-			// Otherwise (PNG, JPEG, WEBP) => decode & resize
-			srcPRT, err := imaging.Open(originalPath)
+
+			img, err := imaging.Decode(bytes.NewReader(fileBytes))
 			if err != nil {
-				fmt.Println("Error opening file for imaging:", err)
+				fmt.Println("Error decoding image:", err)
+				s3ThumbnailKey = s3OriginalKey
 			} else {
-				srcPRT = imaging.Resize(srcPRT, 585, 0, imaging.Linear)
-				if err := imaging.Save(srcPRT, thumbPath); err != nil {
-					fmt.Println("Error saving thumbnail:", err)
+				thumbnail := imaging.Resize(img, 585, 0, imaging.Linear)
+
+				var thumbBuf bytes.Buffer
+				switch extension {
+				case "jpeg":
+					imaging.Encode(&thumbBuf, thumbnail, imaging.JPEG)
+				case "png":
+					imaging.Encode(&thumbBuf, thumbnail, imaging.PNG)
+				case "webp":
+					imaging.Encode(&thumbBuf, thumbnail, imaging.JPEG) 
+				default:
+					imaging.Encode(&thumbBuf, thumbnail, imaging.JPEG)
+				}
+
+				s3ThumbnailKey = fmt.Sprintf("%s/%s_thumb.%s", userID, imageID, extension)
+
+				fmt.Printf("Uploading thumbnail to S3: s3://%s/%s\n", configs.EnvPicturesBucket(), s3ThumbnailKey)
+
+				_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+					Bucket:      aws.String(configs.EnvPicturesBucket()),
+					Key:         aws.String(s3ThumbnailKey),
+					Body:        &thumbBuf,
+					ContentType: aws.String(mimeType),
+				})
+				if err != nil {
+					fmt.Println("Error uploading thumbnail:", err)
+					s3ThumbnailKey = s3OriginalKey 
+				} else {
+					fmt.Println("Thumbnail uploaded to S3")
 				}
 			}
 		}
 
-		// Update location to original
-		newPostPic.Location = originalPath
+	
+		cdnURL := configs.EnvCDNURL()
+		originalURL := cdnURL + "/" + s3OriginalKey
+		thumbnailURL := cdnURL + "/" + s3ThumbnailKey
+
+		newPostPic := models.Content{
+			UserID:       userID,
+			Poster:       userID,
+			Title:        title,
+			Description:  description,
+			Location:     originalURL,   
+			Posting:      thumbnailURL, 
+			S3RawKey:        s3OriginalKey,
+			ThumbnailKey: s3ThumbnailKey,
+			DateCreated:  time.Now(),
+			Show:         show,
+			IsPayPerView: ispayperview,
+			IsDeleted:    isdeleted,
+			PPVPrice:     price,
+			Type:         TYPE_PIC,
+			Visibility:   visibility,
+		}
+
+		newPostPic.Tags = strings.Split(tags, ",")
+		for i, s := range newPostPic.Tags {
+			newPostPic.Tags[i] = strings.TrimSpace(s)
+		}
 
 		// Insert into DB
 		result, err := getContentCollection().InsertOne(ctx, newPostPic)

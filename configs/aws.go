@@ -64,6 +64,14 @@ func EnvCDNURL() string {
 	return cdn
 }
 
+func EnvPicturesCDNURL() string {
+	cdn := os.Getenv("CDN_URL")
+	if cdn == "" {
+		return "https://syn-pictures.b-cdn.net"
+	}
+	return cdn
+}
+
 // ConnectAWS initializes AWS S3 connection using SDK v2
 func ConnectAWS() error {
 	ctx := context.Background()

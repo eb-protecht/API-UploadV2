@@ -553,7 +553,7 @@ func PostProfilePic() http.HandlerFunc {
 		fmt.Println("Profile pic uploaded to S3")
 
 	
-		profilePicURL := configs.EnvCDNURL() + "/" + S3RawKey
+		profilePicURL := configs.EnvPicturesCDNURL() + "/" + S3RawKey
 
 		newPostPic := models.NewProfilePic{
 			UserID:      userID,
@@ -621,7 +621,7 @@ func uploadProfilePic(userID string, file multipart.File, fileHeader *multipart.
 		return "", err
 	}
 
-	return configs.EnvCDNURL() + "/" + s3Key, nil
+	return configs.EnvPicturesCDNURL() + "/" + s3Key, nil
 }
 
 func PostProfilePicBase64() http.HandlerFunc {
@@ -836,7 +836,7 @@ func PostPic() http.HandlerFunc {
 		}
 
 		// Build CDN URLs
-		cdnURL := configs.EnvCDNURL()
+		cdnURL := configs.EnvPicturesCDNURL()
 		originalURL := cdnURL + "/" + s3OriginalKey
 		thumbnailURL := cdnURL + "/" + s3ThumbnailKey
 
@@ -1035,7 +1035,7 @@ func PostPicWithBody() http.HandlerFunc {
 		}
 
 	
-		cdnURL := configs.EnvCDNURL()
+		cdnURL := configs.EnvPicturesCDNURL()
 		originalURL := cdnURL + "/" + s3OriginalKey
 		thumbnailURL := cdnURL + "/" + s3ThumbnailKey
 

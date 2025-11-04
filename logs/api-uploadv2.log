@@ -591,3 +591,5 @@
 {"fields.timestamp":"2025-11-03T18:25:39+01:00","level":"info","message":"Static file serving routes registered","operation":"startup","service":"api-uploadv2","timestamp":"2025-11-03T18:25:39+01:00"}
 {"fields.timestamp":"2025-11-03T18:25:39+01:00","level":"info","message":"API-UploadV2 service startedport3006","operation":"startup","service":"api-uploadv2","timestamp":"2025-11-03T18:25:39+01:00"}
 {"client_ip":"[::1]:61108","duration":"3.089833ms","level":"info","message":"HTTP request completed","method":"POST","path":"/uploadmicro/v1/startstream/testuser123/My Test Stream/Testing live stream/true/false/0/false/test/everyone","service":"http","status_code":201,"timestamp":"2025-11-03T18:27:12+01:00"}
+{"fields.timestamp":"2025-11-03T18:25:39+01:00","level":"info","message":"Shutting down server...","operation":"startup","service":"api-uploadv2","timestamp":"2025-11-03T19:04:06+01:00"}
+{"fields.timestamp":"2025-11-03T18:25:39+01:00","level":"info","message":"Server shutdown complete","operation":"startup","service":"api-uploadv2","timestamp":"2025-11-03T19:04:06+01:00"}

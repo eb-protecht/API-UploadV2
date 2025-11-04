@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+    <video id="video" controls width="640" height="360"></video>
+    <script>
+        const video = document.getElementById('video');
+        const hls = new Hls();
+        hls.loadSource('http://13.50.17.68/hls/22374756de3745a3b53aab6c39ad339b.m3u8');
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+    </script>
+</body>
+</html>

@@ -4,6 +4,7 @@ import (
 	//"context"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -49,6 +50,7 @@ func sendNotificationWithData(userID, initiatorID, message, contentID string, no
 		log.Println("Error marshaling data:", err)
 		return
 	}
+
 	configs.REDIS.Publish(configs.NOTIFICATIONCHANNEL(), jsonData)
 }
 
@@ -56,6 +58,9 @@ func sendLiveStartedNotification(userID string, contentID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	followings := []models.Follow{}
+
+	fmt.Print("followings", followings)
+
 	cur, err := getFollowsCollection().Find(ctx, bson.M{"following": userID})
 	if err != nil {
 		return

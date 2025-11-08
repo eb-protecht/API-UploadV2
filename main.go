@@ -40,6 +40,13 @@ func main() {
 		return
 	}
 
+	logger.Info("Connecting to Redis...")
+	if err := configs.ConnectREDISDB(); err != nil {
+		logger.Fatal("Failed to connect to Redis", "error", err)
+		return
+	}
+	logger.Info("Redis connected successfully")
+
 	logger.Info("Connecting to AWS S3...")
 	if err := initializeAWS(logger); err != nil {
 		logger.Fatal("Failed to initialize AWS S3", "error", err)
@@ -140,15 +147,6 @@ func initializeDatabases(logger *logrus.Entry) error {
 	}
 	logger.Info("PostgreSQL connected successfully", "duration", time.Since(start))
 
-	// Connect to Redis
-	start = time.Now()
-	err = connectRedis()
-	if err != nil {
-		logger.Error("Redis connection failed", "error", err, "duration", time.Since(start))
-		return fmt.Errorf("redis connection failed: %w", err)
-	}
-	logger.Info("Redis connected successfully", "duration", time.Since(start))
-
 	return nil
 }
 
@@ -173,9 +171,6 @@ func connectPostgreSQL() error {
 	return configs.ConnectPSQLDatabase()
 }
 
-func connectRedis() error {
-	return configs.ConnectREDISDB()
-}
 
 func registerRoutes(router *mux.Router, logger *logrus.Entry) {
 	// Register all route groups with logging

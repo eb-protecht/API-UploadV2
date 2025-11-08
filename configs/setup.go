@@ -81,26 +81,26 @@ func GetCollection(client *mongo.Client, collectionName string) *mongo.Collectio
 	return collection
 }
 
-func ConnectREDISDB() error {
-	if REDIS != nil {
-		return nil // Already connected
-	}
+// func ConnectREDISDB() error {
+// 	if REDIS != nil {
+// 		return nil // Already connected
+// 	}
 
-	logger := LogWithContext("database", "redis-connect")
+// 	logger := LogWithContext("database", "redis-connect")
 
-	client := redis.NewClient(&redis.Options{
-		Addr:     RedisURL(),
-		Password: "",
-		DB:       0,
-	})
+// 	client := redis.NewClient(&redis.Options{
+// 		Addr:     RedisURL(),
+// 		Password: "",
+// 		DB:       0,
+// 	})
 
-	pong, err := client.Ping().Result()
-	if err != nil {
-		logger.Error("Failed to connect to Redis", "error", err, "address", RedisURL())
-		return err
-	}
+// 	pong, err := client.Ping().Result()
+// 	if err != nil {
+// 		logger.Error("Failed to connect to Redis", "error", err, "address", RedisURL())
+// 		return err
+// 	}
 
-	REDIS = client
-	logger.Info("Connected to Redis successfully", "address", RedisURL(), "ping_response", pong)
-	return nil
-}
+// 	REDIS = client
+// 	logger.Info("Connected to Redis successfully", "address", RedisURL(), "ping_response", pong)
+// 	return nil
+// }

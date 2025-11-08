@@ -1926,6 +1926,118 @@ func StartStream() http.HandlerFunc {
 	}
 }
 
+func EndView() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		vars := mux.Vars(r)
+		media := vars["MediaID"]
+		viewerid := vars["ViewerID"]
+
+		ctx := context.Background()
+		
+		// Remove from Redis
+		redisKey := fmt.Sprintf("stream:%s:viewer:%s", media, viewerid)
+		configs.GetRedisClient().Del(ctx, redisKey)
+		
+		// Update viewer count
+		go updateLiveViewerCount(media)
+		
+		successResponse(w, map[string]interface{}{"message": "left stream"})
+	}
+}
+
+func StartView() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		vars := mux.Vars(r)
+		media := vars["MediaID"]
+		viewerid := vars["ViewerID"]
+		
+		ctx := context.Background()
+		
+		// Check if it's a live stream
+		objID, err := primitive.ObjectIDFromHex(media)
+		if err != nil {
+			errorResponse(w, err, 400)
+			return
+		}
+		
+		var content models.Content
+		err = getContentCollection().FindOne(ctx, bson.M{"_id": objID}).Decode(&content)
+		if err != nil {
+			errorResponse(w, err, 404)
+			return
+		}
+		
+		// Only track if it's a live stream
+		if content.Type == STREAM && content.IsLive {
+			// Store viewer in Redis with 30s expiry
+			redisKey := fmt.Sprintf("stream:%s:viewer:%s", media, viewerid)
+			configs.GetRedisClient().Set(ctx, redisKey, time.Now().Unix(), 30*time.Second)
+			
+			// Update viewer count
+			go updateLiveViewerCount(media)
+			
+			successResponse(w, map[string]interface{}{
+				"message": "viewing live stream",
+				"viewer_count": content.ViewerCount,
+			})
+		} else {
+			errorResponse(w, fmt.Errorf("not a live stream"), 400)
+		}
+	}
+}
+
+func updateLiveViewerCount(contentID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	objID, err := primitive.ObjectIDFromHex(contentID)
+	if err != nil {
+		return
+	}
+	
+	// Count viewers in Redis
+	pattern := fmt.Sprintf("stream:%s:viewer:*", contentID)
+	keys, err := configs.GetRedisClient().Keys(ctx, pattern).Result()
+	if err != nil {
+		fmt.Println("Error counting viewers:", err)
+		return
+	}
+	
+	viewerCount := len(keys)
+	
+	// Update MongoDB
+	_, err = getContentCollection().UpdateOne(
+		ctx,
+		bson.M{"_id": objID},
+		bson.M{"$set": bson.M{"viewer_count": viewerCount}},
+	)
+	if err != nil {
+		fmt.Println("Error updating viewer count:", err)
+	}
+}
+
+func ViewHeartbeat() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		media := vars["MediaID"]
+		viewerid := vars["ViewerID"]
+		
+		ctx := context.Background()
+		redisKey := fmt.Sprintf("stream:%s:viewer:%s", media, viewerid)
+		
+		// Refresh expiry to 30 fucking seconds
+		err := configs.GetRedisClient().Expire(ctx, redisKey, 30*time.Second).Err()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
 func StartStreamWithBody() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 

@@ -1968,6 +1968,8 @@ func StartView() http.HandlerFunc {
 			errorResponse(w, err, 404)
 			return
 		}
+
+		fmt.Println("content",content);
 		
 		// Only track if it's a live stream
 		if content.Type == TYPE_STREAM && content.IsLive {

@@ -47,11 +47,14 @@ func sendNotificationWithData(userID, initiatorID, message, contentID string, no
 	}
 	jsonData, err := json.Marshal(notificationData)
 	if err != nil {
-		log.Println("Error marshaling data:", err)
+		log.Println("Error marshaling notification data:", err)
 		return
 	}
 
-	configs.REDIS.Publish(configs.NOTIFICATIONCHANNEL(), jsonData)
+	err = configs.GetRedisClient().Publish(ctx, configs.NOTIFICATIONCHANNEL(), jsonData).Err()
+	if err != nil {
+		log.Println("Error publishing notification to Redis:", err)
+	}
 }
 
 func sendLiveStartedNotification(userID string, contentID string) {

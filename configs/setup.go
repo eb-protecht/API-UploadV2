@@ -60,7 +60,7 @@ func GetCollection(client *mongo.Client, collectionName string) *mongo.Collectio
 
 
 	// GOD HELP US
-	if collectionName == "users" {
+	if collectionName == "users" || collectionName == "follows" {
 		uri = "mongodb://localhost:27017/eyeCDB"
 	}
 

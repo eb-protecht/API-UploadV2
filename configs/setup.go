@@ -54,30 +54,28 @@ func GetCollection(client *mongo.Client, collectionName string) *mongo.Collectio
 		panic("MongoDB client is nil - database not connected")
 	}
 
-	// Extract database name from MongoDB URI
-	// URI format: mongodb://user:pass@host:port/database?options
-	uri := EnvMongoURI()
-
-
-	// GOD HELP US
+	var dbName string
+	
+	// GOD HELP US - use local database for users and follows
 	if collectionName == "users" || collectionName == "follows" {
-		uri = "mongodb://localhost:27017/eyeCDB"
+		dbName = "eyeCDB"
+		Logger.Debug("Using local eyeCDB database", "collection", collectionName)
+	} else {
+		// Extract database name from MongoDB URI for other collections
+		uri := EnvMongoURI()
+		Logger.Debug("Getting MongoDB collection", "uri", uri, "collection", collectionName)
+		
+		parts := strings.Split(uri, "/")
+		if len(parts) >= 4 {
+			dbName = strings.Split(parts[3], "?")[0]
+			Logger.Debug("Extracted database name from URI", "database", dbName)
+		} else {
+			Logger.Warn("Failed to parse database name from URI, using fallback", "fallback_db", "synapp")
+			dbName = "synapp"
+		}
 	}
-
-	Logger.Debug("Getting MongoDB collection", "uri", uri, "collection", collectionName)
-
-	// Simple parsing to extract database name
-	parts := strings.Split(uri, "/")
-	if len(parts) >= 4 {
-		dbName := strings.Split(parts[3], "?")[0] // Remove query parameters
-		Logger.Debug("Extracted database name from URI", "database", dbName)
-		collection := client.Database(dbName).Collection(collectionName)
-		return collection
-	}
-
-	// Fallback to hardcoded name if parsing fails
-	Logger.Warn("Failed to parse database name from URI, using fallback", "fallback_db", "synapp", "collection", collectionName)
-	collection := client.Database("synapp").Collection(collectionName)
+	
+	collection := client.Database(dbName).Collection(collectionName)
 	return collection
 }
 

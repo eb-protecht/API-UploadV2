@@ -1983,6 +1983,101 @@ func HandleStreamPublish() http.HandlerFunc {
 	}
 }
 
+func HandleStreamPublishDone() http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(rw, "invalid form", http.StatusBadRequest)
+			return
+		}
+
+		streamKey := r.FormValue("name")
+		
+		if streamKey == "" {
+			http.Error(rw, "missing stream key", http.StatusBadRequest)
+			return
+		}
+
+		fmt.Printf("Stream ENDED: %s\n", streamKey)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		var stream models.Content
+		err := getContentCollection().FindOne(ctx, bson.M{
+			"stream_key": streamKey,
+			"type":       TYPE_STREAM,
+		}).Decode(&stream)
+
+		if err != nil {
+			fmt.Printf("Stream not found: %s\n", streamKey)
+			rw.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Mark stream as ended
+		now := time.Now()
+		
+		// Build the recording URL
+		recordingURL := fmt.Sprintf("%s/streams/%s/%s/playlist.m3u8",
+			configs.EnvCDNURL(), stream.UserID, streamKey)
+		
+		update := bson.M{
+			"$set": bson.M{
+				"is_live":       false,
+				"stream_ended":  now,
+				"hls_url":       recordingURL,
+				"has_recording": true,
+			},
+		}
+
+		_, err = getContentCollection().UpdateOne(
+			ctx,
+			bson.M{"_id": stream.Id},
+			update,
+		)
+
+		if err != nil {
+			fmt.Println("Error updating stream:", err)
+		}
+
+		fmt.Printf("Stream finalized. Recording at: %s\n", recordingURL)
+
+		rw.WriteHeader(http.StatusOK)
+	}
+}
+
+func GetStreamUserID() http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		streamKey := r.URL.Query().Get("stream_key")
+		if streamKey == "" {
+			http.Error(rw, "stream_key required", http.StatusBadRequest)
+			return
+		}
+
+		var stream models.Content
+		err := getContentCollection().FindOne(ctx, bson.M{
+			"stream_key": streamKey,
+			"type":       TYPE_STREAM,
+		}).Decode(&stream)
+
+		if err != nil {
+			http.Error(rw, "stream not found", http.StatusNotFound)
+			return
+		}
+
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(http.StatusOK)
+		json.NewEncoder(rw).Encode(map[string]string{
+			"user_id":    stream.UserID,
+			"stream_key": streamKey,
+		})
+	}
+}
+
+
 
 
 func EndView() http.HandlerFunc {

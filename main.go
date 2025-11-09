@@ -53,8 +53,8 @@ func main() {
 		return
 	}
 
-	// Start live stream monitor
-	go controllers.MonitorLiveStreams()
+	// Start live stream monitor TODO STOP FOR NOW
+	//go controllers.MonitorLiveStreams()
 	logger.Info("Live stream monitor started")
 
 	// Register routes with logging

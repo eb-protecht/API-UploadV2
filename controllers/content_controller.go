@@ -2026,6 +2026,7 @@ func HandleStreamPublishDone() http.HandlerFunc {
 				"is_live":       false,
 				"stream_ended":  now,
 				"hls_url":       recordingURL,
+				"posting": recordingURL,
 				"has_recording": true,
 			},
 		}

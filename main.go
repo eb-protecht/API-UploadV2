@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 	"upload-service/configs"
-	"upload-service/controllers"
+	//"upload-service/controllers"
 	"upload-service/middleware"
 	"upload-service/routes"
 

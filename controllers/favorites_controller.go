@@ -583,9 +583,9 @@ func GetUserFavorites() http.HandlerFunc {
 		
 		albumsCollection := configs.GetCollection(configs.DB, "albums")
 		favoritesCollection := configs.GetCollection(configs.DB, "favorites")
-		contentsCollection := configs.GetCollection(configs.DB, "content")
+		contentsCollection := configs.GetCollection(configs.DB, "contents")
 		
-		
+
 		cursor, err := albumsCollection.Find(ctx, bson.M{"userID": userID})
 		if err != nil {
 			log.Printf("GetUserFavorites: error finding albums: %v", err)
@@ -624,7 +624,7 @@ func GetUserFavorites() http.HandlerFunc {
 			ContentID string             `json:"contentID"`
 			AlbumID   string             `json:"albumID"`
 			DateAdded time.Time          `json:"dateAdded"`
-			Content   *models.Content    `json:"content,omitempty"` 
+			Content   *models.Content    `json:"content"`
 		}
 		
 		type AlbumWithFavorites struct {
@@ -637,6 +637,7 @@ func GetUserFavorites() http.HandlerFunc {
 		}
 		
 		var albumsWithFavorites []AlbumWithFavorites
+		totalOrphansSkipped := 0
 		
 		for _, album := range albums {
 			albumID := album.ID.Hex()
@@ -659,53 +660,54 @@ func GetUserFavorites() http.HandlerFunc {
 			}
 			favCursor.Close(ctx)
 			
-			log.Printf("GetUserFavorites: album '%s' has %d favorites", album.Title, len(favorites))
+			log.Printf("GetUserFavorites: album '%s' has %d favorites (before filtering)", album.Title, len(favorites))
 			
-			// 3. Populate content data for each favorite
+			// 3. Populate content data for each favorite - ONLY INCLUDE IF CONTENT EXISTS
 			var favoritesWithContent []FavoriteWithContent
+			orphansInThisAlbum := 0
 			
 			for _, fav := range favorites {
 				// Fetch full content data
 				contentObjectID, err := primitive.ObjectIDFromHex(fav.ContentID)
 				if err != nil {
-					log.Printf("GetUserFavorites: invalid contentID format: %s", fav.ContentID)
-					// Include favorite without content data
-					favoritesWithContent = append(favoritesWithContent, FavoriteWithContent{
-						ID:        fav.ID,
-						ContentID: fav.ContentID,
-						AlbumID:   fav.AlbumID,
-						DateAdded: fav.DateAdded,
-						Content:   nil,
-					})
-					continue
+					log.Printf("GetUserFavorites: invalid contentID format: %s - skipping", fav.ContentID)
+					orphansInThisAlbum++
+					continue // Skip this favorite
 				}
 				
 				var content models.Content
 				err = contentsCollection.FindOne(ctx, bson.M{"_id": contentObjectID}).Decode(&content)
 				
+				if err != nil {
+					if err == mongo.ErrNoDocuments {
+						log.Printf("GetUserFavorites: content %s not found (deleted/orphaned) - skipping", fav.ContentID)
+					} else {
+						log.Printf("GetUserFavorites: error fetching content %s: %v - skipping", fav.ContentID, err)
+					}
+					orphansInThisAlbum++
+					continue // Skip this favorite - DON'T include in response
+				}
+				
+				// Content exists - include it
 				favWithContent := FavoriteWithContent{
 					ID:        fav.ID,
 					ContentID: fav.ContentID,
 					AlbumID:   fav.AlbumID,
 					DateAdded: fav.DateAdded,
-					Content:   nil,
-				}
-				
-				if err != nil {
-					if err == mongo.ErrNoDocuments {
-						log.Printf("GetUserFavorites: content %s not found (might be deleted)", fav.ContentID)
-					} else {
-						log.Printf("GetUserFavorites: error fetching content %s: %v", fav.ContentID, err)
-					}
-		
-				} else {
-	
-					favWithContent.Content = &content
+					Content:   &content,
 				}
 				
 				favoritesWithContent = append(favoritesWithContent, favWithContent)
 			}
 			
+			if orphansInThisAlbum > 0 {
+				log.Printf("GetUserFavorites: skipped %d orphaned favorites in album '%s'", orphansInThisAlbum, album.Title)
+				totalOrphansSkipped += orphansInThisAlbum
+			}
+			
+			log.Printf("GetUserFavorites: album '%s' has %d valid favorites (after filtering)", album.Title, len(favoritesWithContent))
+			
+			// 4. Build album with favorites
 			albumWithFavs := AlbumWithFavorites{
 				ID:           album.ID,
 				Title:        album.Title,
@@ -718,7 +720,11 @@ func GetUserFavorites() http.HandlerFunc {
 			albumsWithFavorites = append(albumsWithFavorites, albumWithFavs)
 		}
 		
-
+		if totalOrphansSkipped > 0 {
+			log.Printf("GetUserFavorites: TOTAL orphaned favorites skipped: %d", totalOrphansSkipped)
+		}
+		
+		// Return response
 		rw.Header().Set("Content-Type", "application/json")
 		rw.WriteHeader(http.StatusOK)
 		json.NewEncoder(rw).Encode(map[string]interface{}{

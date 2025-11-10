@@ -51,6 +51,8 @@ func sendNotificationWithData(userID, initiatorID, message, contentID string, no
 		return
 	}
 
+	log.Println("PREPARING TO SEND IT")
+
 	err = configs.GetRedisClient().Publish(ctx, configs.NOTIFICATIONCHANNEL(), jsonData).Err()
 	if err != nil {
 		log.Println("Error publishing notification to Redis:", err)

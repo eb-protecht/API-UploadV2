@@ -2020,12 +2020,16 @@ func HandleStreamPublishDone() http.HandlerFunc {
 		// Build the recording URL
 		recordingURL := fmt.Sprintf("%s/streams/%s/%s/playlist.m3u8",
 			configs.EnvCDNURL(), stream.UserID, streamKey)
+
+		thumbnailURL := fmt.Sprintf("%s/streams/%s/%s/thumbnail.jpg",
+			configs.EnvCDNURL(), stream.UserID, streamKey)
 		
 		update := bson.M{
 			"$set": bson.M{
 				"is_live":       false,
 				"stream_ended":  now,
 				"hls_url":       recordingURL,
+				"thumbnail_key": thumbnailURL,
 				"posting": recordingURL,
 				"has_recording": true,
 				"status": "ready",

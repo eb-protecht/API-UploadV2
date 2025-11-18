@@ -1906,7 +1906,7 @@ func StartStream() http.HandlerFunc {
 		}
 
 		go func() {
-			time.Sleep(10 * time.Second)
+			time.Sleep(30 * time.Second)
 			contentID := result.InsertedID.(primitive.ObjectID).Hex()
 			sendLiveStartedNotification(userID, contentID)
 		}()

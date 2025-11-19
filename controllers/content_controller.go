@@ -666,7 +666,7 @@ func PostProfilePicBase64() http.HandlerFunc {
 			// 	"userid":    userID,
 			// 	"iscurrent": true,
 			// }).Decode(&oldPic)
-             // TODO AFTER YOU SET THE DELETE POLICY IN ACCOUNT
+			// TODO AFTER YOU SET THE DELETE POLICY IN ACCOUNT
 			// if err == nil && oldPic.S3RawKey != "" {
 			// 	deleteFromS3(configs.EnvPicturesBucket(), oldPic.S3RawKey)
 			// }
@@ -1906,7 +1906,7 @@ func StartStream() http.HandlerFunc {
 		}
 
 		go func() {
-			// THE NGINX PUBLISHER WILL SEND NOTIFICATION NOT THIS GUY @CHECK 
+			// THE NGINX PUBLISHER WILL SEND NOTIFICATION NOT THIS GUY @CHECK
 			// time.Sleep(30 * time.Second)
 			// contentID := result.InsertedID.(primitive.ObjectID).Hex()
 			// sendLiveStartedNotification(userID, contentID)
@@ -1936,7 +1936,7 @@ func HandleStreamPublish() http.HandlerFunc {
 		}
 
 		streamKey := r.FormValue("name")
-		
+
 		if streamKey == "" {
 			http.Error(rw, "missing stream key", http.StatusBadRequest)
 			return
@@ -1956,7 +1956,6 @@ func HandleStreamPublish() http.HandlerFunc {
 			return
 		}
 
-		
 		now := time.Now()
 		getContentCollection().UpdateOne(
 			ctx,
@@ -1970,11 +1969,20 @@ func HandleStreamPublish() http.HandlerFunc {
 		// Send notifications
 		go func() {
 			contentID := stream.Id.Hex()
-			fmt.Println("TEST => ", contentID)
-			sendLiveStartedNotification(stream.UserID, contentID)
+			hlsURL := fmt.Sprintf("http://13.50.17.68/hls/%s/index.m3u8", streamKey)
+
+			fmt.Printf("Checking HLS availability: %s\n", hlsURL)
+
+			if waitForHLSViaHTTP(hlsURL, 30*time.Second) {
+				fmt.Printf(" HLS ready! Sending notifications for %s\n", streamKey)
+				sendLiveStartedNotification(stream.UserID, contentID)
+			} else {
+				fmt.Printf(" HLS timeout, sending notifications anywayyy for %s\n", streamKey)
+				sendLiveStartedNotification(stream.UserID, contentID)
+			}
 		}()
 
-		fmt.Println( stream.UserID + " IS NOW LIVEE ");
+		fmt.Println(stream.UserID + " IS NOW LIVEE ")
 
 		rw.Header().Set("Content-Type", "application/json")
 		rw.WriteHeader(http.StatusOK)
@@ -1993,7 +2001,7 @@ func HandleStreamPublishDone() http.HandlerFunc {
 		}
 
 		streamKey := r.FormValue("name")
-		
+
 		if streamKey == "" {
 			http.Error(rw, "missing stream key", http.StatusBadRequest)
 			return
@@ -2018,24 +2026,24 @@ func HandleStreamPublishDone() http.HandlerFunc {
 
 		// Mark stream as ended
 		now := time.Now()
-		
+
 		// Build the recording URL
 		recordingURL := fmt.Sprintf("%s/streams/%s/%s/playlist.m3u8",
 			configs.EnvCDNURL(), stream.UserID, streamKey)
 
 		thumbnailURL := fmt.Sprintf("%s/streams/%s/%s/thumbnail.jpg",
 			configs.EnvCDNURL(), stream.UserID, streamKey)
-		
+
 		update := bson.M{
 			"$set": bson.M{
 				"is_live":       false,
 				"stream_ended":  now,
 				"hls_url":       recordingURL,
 				"thumbnail_key": thumbnailURL,
-				"posting": recordingURL,
+				"posting":       recordingURL,
 				"has_recording": true,
-				"status": "ready",
-				"transcoding": TRANSCODING_DONE,
+				"status":        "ready",
+				"transcoding":   TRANSCODING_DONE,
 			},
 		}
 
@@ -2053,6 +2061,63 @@ func HandleStreamPublishDone() http.HandlerFunc {
 
 		rw.WriteHeader(http.StatusOK)
 	}
+}
+
+func waitForHLSViaHTTP(hlsURL string, maxWait time.Duration) bool {
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+	}
+
+	deadline := time.Now().Add(maxWait)
+
+	// Exponential backoff: start fast, then slow down
+	waitDuration := 300 * time.Millisecond // Start at 300ms
+	maxBackoff := 2 * time.Second          // Max 2 seconds between checks
+	minSegments := 2
+
+	attemptCount := 0
+
+	for time.Now().Before(deadline) {
+		attemptCount++
+
+		resp, err := client.Get(hlsURL)
+
+		if err == nil && resp.StatusCode == http.StatusOK {
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			if err == nil {
+				playlist := string(body)
+				segmentCount := strings.Count(playlist, ".ts")
+
+				if segmentCount >= minSegments {
+					fmt.Printf(" HLS ready after %.1fs (%d attempts, %d segments)\n",
+						time.Since(deadline.Add(-maxWait)).Seconds(),
+						attemptCount,
+						segmentCount)
+					return true
+				}
+
+				fmt.Printf(" Attempt %d: %d/%d segments (waiting %v)\n",
+					attemptCount, segmentCount, minSegments, waitDuration)
+			}
+		} else if resp != nil {
+			resp.Body.Close()
+		}
+
+		// Wait before next attempt
+		time.Sleep(waitDuration)
+
+		// Exponential backoff
+		waitDuration = time.Duration(float64(waitDuration) * 1.5)
+		if waitDuration > maxBackoff {
+			waitDuration = maxBackoff
+		}
+	}
+
+	fmt.Printf("HLS timeout after %.1fs (%d attempts)\n",
+		maxWait.Seconds(), attemptCount)
+	return false
 }
 
 func GetStreamUserID() http.HandlerFunc {
@@ -2086,9 +2151,6 @@ func GetStreamUserID() http.HandlerFunc {
 	}
 }
 
-
-
-
 func EndView() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2097,14 +2159,14 @@ func EndView() http.HandlerFunc {
 		viewerid := vars["ViewerID"]
 
 		ctx := context.Background()
-		
+
 		// Remove from Redis
 		redisKey := fmt.Sprintf("stream:%s:viewer:%s", media, viewerid)
 		configs.GetRedisClient().Del(ctx, redisKey)
-		
+
 		// Update viewer count
 		go updateLiveViewerCount(media)
-		
+
 		successResponse(w, map[string]interface{}{"message": "left stream"})
 	}
 }
@@ -2115,16 +2177,16 @@ func StartView() http.HandlerFunc {
 		vars := mux.Vars(r)
 		media := vars["MediaID"]
 		viewerid := vars["ViewerID"]
-		
+
 		ctx := context.Background()
-		
+
 		// Check if it's a live stream
 		objID, err := primitive.ObjectIDFromHex(media)
 		if err != nil {
 			errorResponse(w, err, 400)
 			return
 		}
-		
+
 		var content models.Content
 		err = getContentCollection().FindOne(ctx, bson.M{"_id": objID}).Decode(&content)
 		if err != nil {
@@ -2132,21 +2194,21 @@ func StartView() http.HandlerFunc {
 			return
 		}
 
-		fmt.Println("content",content);
-		
+		fmt.Println("content", content)
+
 		// Only track if it's a live stream
 		if content.Type == TYPE_STREAM && content.IsLive {
 			// Store viewer in Redis with 30s expiry
 			redisKey := fmt.Sprintf("stream:%s:viewer:%s", media, viewerid)
 			configs.GetRedisClient().Set(ctx, redisKey, time.Now().Unix(), 30*time.Second)
-			
+
 			// Update viewer count
 			go updateLiveViewerCount(media)
 
-			fmt.Println("JOINEDDDDDDDDDDD");
-			
+			fmt.Println("JOINEDDDDDDDDDDD")
+
 			successResponse(w, map[string]interface{}{
-				"message": "viewing live stream",
+				"message":      "viewing live stream",
 				"viewer_count": content.ViewerCount,
 			})
 		} else {
@@ -2158,12 +2220,12 @@ func StartView() http.HandlerFunc {
 func updateLiveViewerCount(contentID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	objID, err := primitive.ObjectIDFromHex(contentID)
 	if err != nil {
 		return
 	}
-	
+
 	// Count viewers in Redis
 	pattern := fmt.Sprintf("stream:%s:viewer:*", contentID)
 	keys, err := configs.GetRedisClient().Keys(ctx, pattern).Result()
@@ -2171,9 +2233,9 @@ func updateLiveViewerCount(contentID string) {
 		fmt.Println("Error counting viewers:", err)
 		return
 	}
-	
+
 	viewerCount := len(keys)
-	
+
 	// Update MongoDB
 	_, err = getContentCollection().UpdateOne(
 		ctx,
@@ -2190,17 +2252,17 @@ func ViewHeartbeat() http.HandlerFunc {
 		vars := mux.Vars(r)
 		media := vars["MediaID"]
 		viewerid := vars["ViewerID"]
-		
+
 		ctx := context.Background()
 		redisKey := fmt.Sprintf("stream:%s:viewer:%s", media, viewerid)
-		
+
 		// Refresh expiry to 30 fucking seconds
 		err := configs.GetRedisClient().Expire(ctx, redisKey, 30*time.Second).Err()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		
+
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -2282,9 +2344,9 @@ func StartStreamWithBody() http.HandlerFunc {
 		}
 
 		go func() {
-			time.Sleep(10 * time.Second)
-			contentID := result.InsertedID.(primitive.ObjectID).Hex()
-			sendLiveStartedNotification(userID, contentID)
+			// time.Sleep(10 * time.Second)
+			// contentID := result.InsertedID.(primitive.ObjectID).Hex()
+			// sendLiveStartedNotification(userID, contentID)
 		}()
 
 		rw.WriteHeader(http.StatusCreated)

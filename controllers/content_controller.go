@@ -1906,9 +1906,10 @@ func StartStream() http.HandlerFunc {
 		}
 
 		go func() {
-			time.Sleep(30 * time.Second)
-			contentID := result.InsertedID.(primitive.ObjectID).Hex()
-			sendLiveStartedNotification(userID, contentID)
+			// THE NGINX PUBLISHER WILL SEND NOTIFICATION NOT THIS GUY @CHECK 
+			// time.Sleep(30 * time.Second)
+			// contentID := result.InsertedID.(primitive.ObjectID).Hex()
+			// sendLiveStartedNotification(userID, contentID)
 		}()
 
 		rw.WriteHeader(http.StatusCreated)
@@ -1969,6 +1970,7 @@ func HandleStreamPublish() http.HandlerFunc {
 		// Send notifications
 		go func() {
 			contentID := stream.Id.Hex()
+			fmt.Println("TEST => ", contentID)
 			sendLiveStartedNotification(stream.UserID, contentID)
 		}()
 

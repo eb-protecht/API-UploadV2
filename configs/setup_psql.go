@@ -21,10 +21,9 @@ func ConnectPSQLDatabase() error {
 		EnvDBHost(),
 		EnvDBUser(),
 		EnvDBPassword(),
-		EnvDBName(),
+		"eyecdb",
 		EnvDBPort(),
 	)
-
 	logger.Debug("Connecting to PostgreSQL", "host", EnvDBHost(), "port", EnvDBPort(), "database", EnvDBName())
 
 	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -12,10 +11,6 @@ import (
 	"upload-service/models"
 )
 
-var (
-	cleanupInProgress = make(map[string]bool)
-	cleanupMutex      sync.Mutex
-)
 
 func MonitorLiveStreams() {
 	ticker := time.NewTicker(12 * time.Second)
@@ -108,28 +103,18 @@ func checkHLSLastModified(hlsURL string) (time.Time, bool) {
 }
 
 func triggerRemoteCleanup(streamKey string) {
-	cleanupMutex.Lock()
-	if cleanupInProgress[streamKey] {
-		cleanupMutex.Unlock()
-		return
-	}
-	cleanupInProgress[streamKey] = true
-	cleanupMutex.Unlock()
-
+	fmt.Printf("🔍 triggerRemoteCleanup CALLED for: %s\n", streamKey)
 	fmt.Printf("🧹 Triggering cleanup for: %s\n", streamKey)
 
 	cleanupURL := fmt.Sprintf("http://%s/api/cleanup/%s", configs.EnvStreamingServer(), streamKey)
+	fmt.Printf("🌐 Calling: %s\n", cleanupURL)
+	
 	resp, err := http.Post(cleanupURL, "application/json", nil)
 	if err != nil {
 		fmt.Printf("❌ Failed to trigger cleanup: %v\n", err)
-	} else {
-		resp.Body.Close()
-		fmt.Printf("✅ Cleanup triggered for: %s\n", streamKey)
+		return
 	}
-
-	time.AfterFunc(1*time.Minute, func() {
-		cleanupMutex.Lock()
-		delete(cleanupInProgress, streamKey)
-		cleanupMutex.Unlock()
-	})
+	defer resp.Body.Close()
+	
+	fmt.Printf("✅ Cleanup triggered for: %s\n", streamKey)
 }

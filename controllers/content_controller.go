@@ -2437,3 +2437,177 @@ func DeleteContent() http.HandlerFunc {
 		successResponse(rw, "Content deleted successfully")
 	}
 }
+
+// Define a struct for cleaner code
+type UploadedFile struct {
+	Filename string `json:"filename"`
+	S3Key    string `json:"s3_key"`
+	Size     int64  `json:"size"`
+}
+
+type FailedFile struct {
+	Filename string `json:"filename"`
+	Error    string `json:"error"`
+}
+
+func UploadMultipleFiles() http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+		defer cancel()
+
+		// Parse multipart form
+		if err := r.ParseMultipartForm(8024 * 100 * MB); err != nil {
+			errorResponse(rw, fmt.Errorf("error parsing form: %v", err), 400)
+			return
+		}
+
+		userID := r.FormValue("user_id")
+		videoID := r.FormValue("video_id")
+
+		if userID == "" || videoID == "" {
+			errorResponse(rw, fmt.Errorf("missing user_id or video_id"), 400)
+			return
+		}
+
+		fmt.Printf("User ID: %s\n", userID)
+		fmt.Printf("Video ID: %s\n", videoID)
+		fmt.Println("=================================")
+
+		// Get all files
+		files := r.MultipartForm.File["files"]
+
+		if len(files) == 0 {
+			errorResponse(rw, fmt.Errorf("no files uploaded"), 400)
+			return
+		}
+
+		fmt.Printf("Total files received: %d\n", len(files))
+		fmt.Println("=================================")
+
+		// Get S3 uploader
+		uploader := configs.GetS3Uploader()
+
+		var uploadedFiles []UploadedFile
+		var failedFiles []FailedFile
+		var playlistKey string
+
+		// Upload each file to S3
+		for i, fileHeader := range files {
+			fmt.Printf("Processing file %d/%d: %s\n", i+1, len(files), fileHeader.Filename)
+
+			// Open the file
+			file, err := fileHeader.Open()
+			if err != nil {
+				fmt.Printf("  ERROR: Failed to open file: %v\n", err)
+				failedFiles = append(failedFiles, FailedFile{
+					Filename: fileHeader.Filename,
+					Error:    err.Error(),
+				})
+				continue
+			}
+
+			// Determine content type
+			contentType := getContentType(fileHeader.Filename)
+
+			// S3 key: videoId/filename
+			s3Key := fmt.Sprintf("%s/%s", videoID, fileHeader.Filename)
+
+			// Check if this is the playlist file
+			if strings.HasSuffix(fileHeader.Filename, ".m3u8") {
+				playlistKey = s3Key
+			}
+
+			fmt.Printf("  Uploading to S3: s3://%s/%s\n", configs.EnvProcessedBucket(), s3Key)
+
+			// Upload to S3
+			_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+				Bucket:      aws.String(configs.EnvProcessedBucket()),
+				Key:         aws.String(s3Key),
+				Body:        file,
+				ContentType: aws.String(contentType),
+			})
+
+			file.Close()
+
+			if err != nil {
+				fmt.Printf("  ERROR: Failed to upload to S3: %v\n", err)
+				failedFiles = append(failedFiles, FailedFile{
+					Filename: fileHeader.Filename,
+					Error:    err.Error(),
+				})
+				continue
+			}
+
+			fmt.Printf("  SUCCESS: Uploaded %s (%d bytes)\n", fileHeader.Filename, fileHeader.Size)
+
+			uploadedFiles = append(uploadedFiles, UploadedFile{
+				Filename: fileHeader.Filename,
+				S3Key:    s3Key,
+				Size:     fileHeader.Size,
+			})
+
+			fmt.Println("---------------------------------")
+		}
+
+		fmt.Printf("\n=================================\n")
+		fmt.Printf("Upload Summary:\n")
+		fmt.Printf("  Successful: %d\n", len(uploadedFiles))
+		fmt.Printf("  Failed: %d\n", len(failedFiles))
+		fmt.Printf("=================================\n")
+
+		// Update Content collection with HLS URL
+		if playlistKey != "" {
+			// Use your CDN URL instead of S3 direct URL
+			hlsURL := fmt.Sprintf("https://syn-video-cdn.b-cdn.net/%s", playlistKey)
+
+			// Update by video_id only (since it's unique)
+			filter := bson.M{"video_id": videoID}
+			update := bson.M{
+				"$set": bson.M{
+					"hls_url":     hlsURL,
+					"posting":     hlsURL,
+					"transcoding": "done",
+				},
+			}
+
+			result, err := getContentCollection().UpdateOne(ctx, filter, update)
+			if err != nil {
+				fmt.Printf("ERROR: Failed to update content collection: %v\n", err)
+			} else if result.MatchedCount == 0 {
+				fmt.Printf("WARNING: No content found with video_id=%s\n", videoID)
+			} else {
+				fmt.Printf("SUCCESS: Updated content collection with HLS URL: %s\n", hlsURL)
+			}
+		} else {
+			fmt.Println("WARNING: No .m3u8 file found, skipping database update")
+		}
+
+		// Return response
+		rw.WriteHeader(http.StatusOK)
+		response := map[string]interface{}{
+			"status":         "success",
+			"message":        fmt.Sprintf("Uploaded %d/%d files successfully", len(uploadedFiles), len(files)),
+			"video_id":       videoID,
+			"user_id":        userID,
+			"hls_url":        fmt.Sprintf("https://syn-video-cdn.b-cdn.net/%s", playlistKey),
+			"uploaded_files": uploadedFiles,
+			"failed_files":   failedFiles,
+		}
+		json.NewEncoder(rw).Encode(response)
+	}
+}
+
+func getContentType(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	switch ext {
+	case ".m3u8":
+		return "application/x-mpegURL"
+	case ".ts":
+		return "video/MP2T"
+	case ".mp4":
+		return "video/mp4"
+	default:
+		return "application/octet-stream"
+	}
+}

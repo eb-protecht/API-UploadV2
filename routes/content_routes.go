@@ -47,4 +47,9 @@ func ContentRoutes(router *mux.Router) {
 	router.HandleFunc("/uploadmicro/v1/setInitialVisibility", controllers.SetInitialVisibility()).Methods("POST")
 	router.HandleFunc("/uploadmicro/v1/setTranscodingStatus", controllers.SetTranscodingStatus()).Methods("GET")
 
+
+
+	// MIGRATON
+	router.HandleFunc("/uploadmicro/v1/upload-files", controllers.UploadMultipleFiles()).Methods("POST")
+
 }

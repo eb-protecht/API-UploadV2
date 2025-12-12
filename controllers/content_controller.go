@@ -2456,7 +2456,7 @@ func UploadMultipleFiles() http.HandlerFunc {
 		defer cancel()
 
 		// Parse multipart form
-		if err := r.ParseMultipartForm(8024 * 100 * MB); err != nil {
+		if err := r.ParseMultipartForm(1024 * 100 * MB); err != nil {
 			errorResponse(rw, fmt.Errorf("error parsing form: %v", err), 400)
 			return
 		}
@@ -2475,7 +2475,7 @@ func UploadMultipleFiles() http.HandlerFunc {
 
 		// Get all files
 		files := r.MultipartForm.File["files"]
-
+		
 		if len(files) == 0 {
 			errorResponse(rw, fmt.Errorf("no files uploaded"), 400)
 			return
@@ -2486,10 +2486,12 @@ func UploadMultipleFiles() http.HandlerFunc {
 
 		// Get S3 uploader
 		uploader := configs.GetS3Uploader()
-
+		
 		var uploadedFiles []UploadedFile
 		var failedFiles []FailedFile
 		var playlistKey string
+		var thumbnailKey string
+		var thumbnailURL string
 
 		// Upload each file to S3
 		for i, fileHeader := range files {
@@ -2506,18 +2508,30 @@ func UploadMultipleFiles() http.HandlerFunc {
 				continue
 			}
 
-			// Determine content type
+			// Determine content type and file category
 			contentType := getContentType(fileHeader.Filename)
-
-			// S3 key: videoId/filename
-			s3Key := fmt.Sprintf("%s/%s", videoID, fileHeader.Filename)
-
-			// Check if this is the playlist file
-			if strings.HasSuffix(fileHeader.Filename, ".m3u8") {
+			fileExt := strings.ToLower(filepath.Ext(fileHeader.Filename))
+			
+			var s3Key string
+			
+			// Check if it's a thumbnail image
+			if isImageFile(fileExt) {
+				// Upload to thumbnails folder with original filename
+				s3Key = fmt.Sprintf("thumbnails/%s", fileHeader.Filename)
+				thumbnailKey = s3Key
+				thumbnailURL = fmt.Sprintf("https://syn-video-cdn.b-cdn.net/%s", thumbnailKey)
+				fmt.Printf("  Detected thumbnail image\n")
+			} else if strings.HasSuffix(fileHeader.Filename, ".m3u8") {
+				// Playlist file
+				s3Key = fmt.Sprintf("%s/%s", videoID, fileHeader.Filename)
 				playlistKey = s3Key
+			} else {
+				// Regular video segments
+				s3Key = fmt.Sprintf("%s/%s", videoID, fileHeader.Filename)
 			}
 
 			fmt.Printf("  Uploading to S3: s3://%s/%s\n", configs.EnvProcessedBucket(), s3Key)
+			fmt.Printf("  Content-Type: %s\n", contentType)
 
 			// Upload to S3
 			_, err = uploader.Upload(ctx, &s3.PutObjectInput{
@@ -2539,13 +2553,13 @@ func UploadMultipleFiles() http.HandlerFunc {
 			}
 
 			fmt.Printf("  SUCCESS: Uploaded %s (%d bytes)\n", fileHeader.Filename, fileHeader.Size)
-
+			
 			uploadedFiles = append(uploadedFiles, UploadedFile{
 				Filename: fileHeader.Filename,
 				S3Key:    s3Key,
 				Size:     fileHeader.Size,
 			})
-
+			
 			fmt.Println("---------------------------------")
 		}
 
@@ -2555,31 +2569,39 @@ func UploadMultipleFiles() http.HandlerFunc {
 		fmt.Printf("  Failed: %d\n", len(failedFiles))
 		fmt.Printf("=================================\n")
 
-		// Update Content collection with HLS URL
+		// Update Content collection
+		var hlsURL string
 		if playlistKey != "" {
-			// Use your CDN URL instead of S3 direct URL
-			hlsURL := fmt.Sprintf("https://syn-video-cdn.b-cdn.net/%s", playlistKey)
+			hlsURL = fmt.Sprintf("https://syn-video-cdn.b-cdn.net/%s", playlistKey)
+		}
 
-			// Update by video_id only (since it's unique)
-			filter := bson.M{"video_id": videoID}
-			update := bson.M{
-				"$set": bson.M{
-					"hls_url":     hlsURL,
-					"posting":     hlsURL,
-					"transcoding": "done",
-				},
-			}
+		// Prepare update document
+		updateDoc := bson.M{
+			"transcoding":  "done",
+			"date_updated": time.Now(),
+		}
 
-			result, err := getContentCollection().UpdateOne(ctx, filter, update)
-			if err != nil {
-				fmt.Printf("ERROR: Failed to update content collection: %v\n", err)
-			} else if result.MatchedCount == 0 {
-				fmt.Printf("WARNING: No content found with video_id=%s\n", videoID)
-			} else {
-				fmt.Printf("SUCCESS: Updated content collection with HLS URL: %s\n", hlsURL)
-			}
+		if hlsURL != "" {
+			updateDoc["hls_url"] = hlsURL
+			fmt.Printf("HLS URL: %s\n", hlsURL)
+		}
+
+		if thumbnailURL != "" {
+			updateDoc["thumbnail_key"] = thumbnailURL
+			fmt.Printf("Thumbnail URL: %s\n", thumbnailURL)
+		}
+
+		// Update database
+		filter := bson.M{"video_id": videoID}
+		update := bson.M{"$set": updateDoc}
+
+		result, err := getContentCollection().UpdateOne(ctx, filter, update)
+		if err != nil {
+			fmt.Printf("ERROR: Failed to update content collection: %v\n", err)
+		} else if result.MatchedCount == 0 {
+			fmt.Printf("WARNING: No content found with video_id=%s\n", videoID)
 		} else {
-			fmt.Println("WARNING: No .m3u8 file found, skipping database update")
+			fmt.Printf("SUCCESS: Updated content collection\n")
 		}
 
 		// Return response
@@ -2589,7 +2611,8 @@ func UploadMultipleFiles() http.HandlerFunc {
 			"message":        fmt.Sprintf("Uploaded %d/%d files successfully", len(uploadedFiles), len(files)),
 			"video_id":       videoID,
 			"user_id":        userID,
-			"hls_url":        fmt.Sprintf("https://syn-video-cdn.b-cdn.net/%s", playlistKey),
+			"hls_url":        hlsURL,
+			"thumbnail_url":  thumbnailURL,
 			"uploaded_files": uploadedFiles,
 			"failed_files":   failedFiles,
 		}
@@ -2597,9 +2620,20 @@ func UploadMultipleFiles() http.HandlerFunc {
 	}
 }
 
+// isImageFile checks if the file extension is an image
+func isImageFile(ext string) bool {
+	imageExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".ico"}
+	for _, imgExt := range imageExtensions {
+		if ext == imgExt {
+			return true
+		}
+	}
+	return false
+}
+
 func getContentType(filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
-
+	
 	switch ext {
 	case ".m3u8":
 		return "application/x-mpegURL"
@@ -2607,6 +2641,18 @@ func getContentType(filename string) string {
 		return "video/MP2T"
 	case ".mp4":
 		return "video/mp4"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	case ".svg":
+		return "image/svg+xml"
 	default:
 		return "application/octet-stream"
 	}

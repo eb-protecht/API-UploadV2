@@ -82,11 +82,14 @@ func main() {
 
 	// Create server with timeouts
 	server := &http.Server{
-		Addr:         ":" + port,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:    ":" + port,
+		Handler: router,
+		// ReadTimeout:  15 * time.Second,
+		// WriteTimeout: 15 * time.Second,
+		// IdleTimeout:  60 * time.Second, TODO REVERT
+		ReadTimeout:  120 * time.Minute,
+		WriteTimeout: 120 * time.Minute,
+		IdleTimeout:  120 * time.Minute,
 	}
 
 	// Start server in goroutine
@@ -172,7 +175,6 @@ func connectMongoDB() error {
 func connectPostgreSQL() error {
 	return configs.ConnectPSQLDatabase()
 }
-
 
 func registerRoutes(router *mux.Router, logger *logrus.Entry) {
 	// Register all route groups with logging
